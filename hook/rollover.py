@@ -42,7 +42,6 @@ CLI (run by the chats, see instruction() and part2_prompt()):
 """
 import contextlib
 import datetime
-import fcntl
 import glob
 import json
 import os
@@ -384,12 +383,8 @@ def save(rid, data, name="state"):
 @contextlib.contextmanager
 def locked(rid):
     os.makedirs(_dir(rid), exist_ok=True)
-    with open(os.path.join(_dir(rid), ".lock"), "a") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+    with sb.exclusive(os.path.join(_dir(rid), ".lock")):
+        yield
 
 
 def step(rec, name, **kw):

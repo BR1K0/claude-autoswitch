@@ -472,7 +472,7 @@ class BridgeTest(Base):
         import acpmh_bridge as br
         out = br.build_handoff(self.tr, "/Users/me/proj", out=os.path.join(self.d, "h.md"))
         self.assertEqual(out, os.path.join(self.d, "h.md"))
-        self.assertIn("acpmh_home/-Users-kem-proj", _read_text(out))
+        self.assertIn(os.path.join("acpmh_home", "-Users-kem-proj"), _read_text(out))
         cmds = [c[0] for c in self.calls()]
         self.assertEqual(cmds, ["ingest", "build"])
         self.assertEqual(self.calls()[0], ["ingest", "--store", os.path.join(self.d, "acpmh_home", "-Users-kem-proj"), self.tr])
@@ -678,6 +678,7 @@ class WatcherTest(Base):
         return subprocess.Popen(["bash", os.path.join(SB, "watch.sh")], stdout=subprocess.PIPE, text=True,
                                 env={**self.env, **env})
 
+    @unittest.skipIf(sys.platform == "win32", "runs the POSIX watcher hook/watch.sh with bash; Windows uses hook/watch.py")
     def test_second_watcher_stops(self):
         alive = os.path.join(self.d, "watcher.alive")
         _write_text(alive, "local_other")
@@ -689,6 +690,7 @@ class WatcherTest(Base):
                 w.kill(); w.communicate()
         self.assertEqual(_read_text(alive), "local_other")
 
+    @unittest.skipIf(sys.platform == "win32", "runs the POSIX watcher hook/watch.sh with bash; Windows uses hook/watch.py")
     def test_stale_heartbeat_or_flag_off_keeps_running(self):
         alive = os.path.join(self.d, "watcher.alive")
         for env, stale in (({"AUTOSWITCH_WATCHER_ID": "local_me"}, True),

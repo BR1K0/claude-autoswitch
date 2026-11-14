@@ -22,7 +22,6 @@ current chat, which builds the handoff (acpmh_bridge.py), starts part 2 with the
 $AUTOSWITCH_DIR/handoff/<id>.json until part 2's hook sees the tag (exactly once).
 """
 import contextlib
-import fcntl
 import glob
 import json
 import os
@@ -147,12 +146,8 @@ def save(rec):
 def locked(rid):
     """Serialises the status changes of one request (build, timeout note, delivery)."""
     os.makedirs(sb.path("handoff"), exist_ok=True)
-    with open(sb.path("handoff", rid + ".lock"), "a") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+    with sb.exclusive(sb.path("handoff", rid + ".lock")):
+        yield
 
 
 def all_records():

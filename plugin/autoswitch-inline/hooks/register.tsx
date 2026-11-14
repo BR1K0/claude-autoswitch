@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { AutoswitchInlineBudget, AutoswitchInlineLast } from '../types'
 
-// The router is the installed claude-autoswitch hook (install.sh copies it to ~/.autoswitch/app/hook/hint.py);
+// The router is the installed claude-autoswitch hook (install.sh / install.ps1 copy it to ~/.autoswitch/app/hook/hint.py);
 // the mod only asks it, never decides.
 const LIMIT_MS = 1500
 // image turns: hint.py OCRs the screenshots (about 1 s for two) before it scores them
@@ -19,10 +19,19 @@ const last = atom({ plugin: 'autoswitch-inline', key: 'last' } as const, null)
 type Context = { prompt: string; sessionId?: string; transcriptPath?: string; cwd?: string; imageCount?: number }
 type Hint = { target?: unknown; reason?: unknown; handoff_to?: unknown }
 
-const home = async ($: EngineInterface) => (await $.env.get('HOME')) ?? ''
+// Windows sets OS=Windows_NT for every process (cmd, PowerShell, the desktop app); nothing else does.
+const isWindows = async ($: EngineInterface) => (await $.env.get('OS')) === 'Windows_NT'
+// HOME first (also set by Git Bash and some Windows setups), then USERPROFILE (Windows).
+const home = async ($: EngineInterface) => (await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || ''
+/** Joins path parts with the platform's separator; `a/b` inside a part is split, so callers write one form. */
+const join = async ($: EngineInterface, first: string, ...rest: string[]) => {
+  const sep = (await isWindows($)) ? '\\' : '/'
+  const parts = rest.flatMap(r => r.split('/')).filter(Boolean)
+  return [first.replace(/[\\/]+$/, ''), ...parts].join(sep)
+}
 // State lives in $AUTOSWITCH_DIR, by default ~/.autoswitch (the same folder the hook and `autoswitch` use).
-const baseDir = async ($: EngineInterface) => (await $.env.get('AUTOSWITCH_DIR')) || `${await home($)}/.autoswitch`
-const sbPath = async ($: EngineInterface, name: string) => `${await baseDir($)}/${name}`
+const baseDir = async ($: EngineInterface) => (await $.env.get('AUTOSWITCH_DIR')) || join($, await home($), '.autoswitch')
+const sbPath = async ($: EngineInterface, name: string) => join($, await baseDir($), name)
 const hintPath = async ($: EngineInterface) => sbPath($, 'app/hook/hint.py')
 
 const readWord = async ($: EngineInterface, name: string): Promise<string> => {
@@ -96,11 +105,41 @@ const parseHint = (stdout: string): Hint | null => {
   }
 }
 
+/** The interpreter that worked last; kept for the life of the module (a reload asks again). */
+type PythonCache = { argv: readonly string[] | null }
+
+/**
+ * The commands to try for Python, in order. macOS/Linux: python3. Windows: the launcher install.ps1 found
+ * (~/.autoswitch/python-cmd, e.g. `py -3.12`), then `py -3`, then `python`. One that worked before goes first.
+ */
+const pythons = async ($: EngineInterface, cache: PythonCache): Promise<(readonly string[])[]> => {
+  if (!(await isWindows($))) return [['python3']]
+  const found: (readonly string[])[] = []
+  try {
+    const text = await $.fs.read(await sbPath($, 'python-cmd'))
+    const argv = typeof text === 'string' ? text.trim().split(/\s+/).filter(Boolean) : []
+    // only a bare launcher (`py -3.12`, `python`): a full path with spaces cannot be split back safely
+    if (argv.length > 0 && !/[\\/:]/.test(argv[0]!)) found.push(argv)
+  } catch {
+    // no python-cmd: the defaults below
+  }
+  found.push(['py', '-3'], ['python'])
+  const order = cache.argv === null ? found : [cache.argv, ...found]
+  const seen = new Set<string>()
+  return order.filter(argv => {
+    const key = argv.join('\u0000')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 /** Asks hint.py (dry run) for the turn's model. Null: leave it alone. */
 const ask = async (
   $: EngineInterface,
   ctx: Context,
   model: string,
+  cache: PythonCache,
   images: readonly string[] = [],
 ): Promise<{ target: string | null; reason: string; ms: number }> => {
   const limit = images.length > 0 ? IMAGE_LIMIT_MS : LIMIT_MS
@@ -111,7 +150,7 @@ const ask = async (
     const cwd = ctx.cwd ?? (await $.session.cwd())
     const transcriptPath =
       ctx.transcriptPath ??
-      `${await home($)}/.claude/projects/${cwd.replace(/[^A-Za-z0-9]/g, '-')}/${sessionId}.jsonl`
+      (await join($, await home($), '.claude', 'projects', cwd.replace(/[^A-Za-z0-9]/g, '-'), `${sessionId}.jsonl`))
     const hostId = await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')
     const env: Record<string, string> = {
       AUTOSWITCH_DRY: '1',
@@ -120,20 +159,38 @@ const ask = async (
       CLAUDE_CODE_ENTRYPOINT: 'claude-desktop',
     }
     if (hostId !== undefined) env.CLAUDE_CODE_HOST_SESSION_ID = hostId
-    const ran = await $.process.run(['python3', await hintPath($)], {
-      env,
-      stdin: JSON.stringify({
-        prompt: ctx.prompt,
-        session_id: sessionId,
-        transcript_path: transcriptPath,
-        cwd,
-        ...(images.length > 0 ? { images } : {}),
-      }),
-      timeoutMs: limit,
+    const stdin = JSON.stringify({
+      prompt: ctx.prompt,
+      session_id: sessionId,
+      transcript_path: transcriptPath,
+      cwd,
+      ...(images.length > 0 ? { images } : {}),
     })
+    const script = await hintPath($)
+    // hint.py always exits 0, so a command that cannot start or exits non-zero is a missing or broken
+    // interpreter (the Windows Store `python` stub, `py` with no Python 3): try the next, inside the same time limit.
+    let ran: Awaited<ReturnType<EngineInterface['process']['run']>> | null = null
+    let failure = 'no Python found'
+    for (const argv of await pythons($, cache)) {
+      const left = limit - (await elapsed())
+      if (left <= 0) break
+      try {
+        const got = await $.process.run([...argv, script], { env, stdin, timeoutMs: left })
+        if (got.exitCode === 0) {
+          cache.argv = argv
+          ran = got
+          break
+        }
+        failure = `router exited ${got.exitCode} (${argv.join(' ')})`
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        failure = `router failed: ${message.slice(0, 120)}`
+        if (/timed out/i.test(message)) break // it started and ran too long: another interpreter would too
+      }
+    }
     const ms = await elapsed()
     if (ms > limit) return { target: null, reason: `router too slow (${ms} ms)`, ms }
-    if (ran.exitCode !== 0) return { target: null, reason: `router exited ${ran.exitCode}`, ms }
+    if (ran === null) return { target: null, reason: failure, ms }
     const hint = parseHint(ran.stdout)
     if (hint === null) return { target: null, reason: 'router gave no decision', ms }
     const reason = typeof hint.reason === 'string' ? hint.reason : ''
@@ -148,12 +205,21 @@ const ask = async (
   }
 }
 
+const LOG_LINES = 2000
+
+/** Appends one row to inline.jsonl, keeping the last LOG_LINES rows (read and rewrite: works the same everywhere). */
 const log = async ($: EngineInterface, row: Record<string, unknown>) => {
   try {
-    await $.process.run(['/usr/bin/tee', '-a', await sbPath($, 'inline.jsonl')], {
-      stdin: `${JSON.stringify(row)}\n`,
-      timeoutMs: 1000,
-    })
+    const path = await sbPath($, 'inline.jsonl')
+    let text = ''
+    try {
+      const old = await $.fs.read(path)
+      text = typeof old === 'string' ? old : ''
+    } catch {
+      // missing, or over the engine's 4 MiB read limit: start again
+    }
+    const lines = `${text}${JSON.stringify(row)}\n`.split('\n').filter(Boolean).slice(-LOG_LINES)
+    await $.fs.write(path, `${lines.join('\n')}\n`)
   } catch {
     // a log that cannot be written never holds the turn up
   }
@@ -164,6 +230,7 @@ export const register: Register = on => {
   let pending: Context | null = null
   const prompts = new Map<string, Context>()
   const models = new Map<string, string | null>()
+  const python: PythonCache = { argv: null }
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -224,7 +291,7 @@ export const register: Register = on => {
         if (ctx !== undefined && text === '' && images.length === 0) {
           got = { ...got, reason: (ctx.imageCount ?? 0) > 0 ? 'images with no file to read' : 'empty prompt' }
         } else if (ctx !== undefined) {
-          got = { ...(await ask($, ctx, e.model, images)), images: images.length }
+          got = { ...(await ask($, ctx, e.model, python, images)), images: images.length }
         }
         chosen = got.target !== null && got.target !== e.model ? got.target : null
         reason = got.reason
