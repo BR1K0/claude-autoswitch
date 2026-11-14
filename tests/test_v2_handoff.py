@@ -678,6 +678,7 @@ class WatcherTest(Base):
         return subprocess.Popen(["bash", os.path.join(SB, "watch.sh")], stdout=subprocess.PIPE, text=True,
                                 env={**self.env, **env})
 
+    @unittest.skipIf(sys.platform == "win32", "runs the POSIX watcher hook/watch.sh with bash; Windows uses hook/watch.py")
     def test_second_watcher_stops(self):
         alive = os.path.join(self.d, "watcher.alive")
         _write_text(alive, "local_other")
@@ -689,6 +690,7 @@ class WatcherTest(Base):
                 w.kill(); w.communicate()
         self.assertEqual(_read_text(alive), "local_other")
 
+    @unittest.skipIf(sys.platform == "win32", "runs the POSIX watcher hook/watch.sh with bash; Windows uses hook/watch.py")
     def test_stale_heartbeat_or_flag_off_keeps_running(self):
         alive = os.path.join(self.d, "watcher.alive")
         for env, stale in (({"AUTOSWITCH_WATCHER_ID": "local_me"}, True),

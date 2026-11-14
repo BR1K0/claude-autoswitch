@@ -8,6 +8,7 @@ Layout under $AUTOSWITCH_DIR (default ~/.autoswitch):
   pass/<id>          loop guard: one-shot token the hook consumes
   inline/<cli id>    written by the autoswitch-inline plugin: this chat picks its model inline (speed inline)
 """
+import contextlib
 import json
 import os
 import re
@@ -19,6 +20,35 @@ MARK = "[autoswitch:"  # prefix the Watcher puts on a re-sent prompt: [autoswitc
 
 def path(*parts):
     return os.path.join(BASE, *parts)
+
+
+
+@contextlib.contextmanager
+def exclusive(lock_path):
+    """Holds an exclusive lock on lock_path (created if missing) for the with-block, across processes:
+    flock on macOS/Linux, msvcrt.locking on Windows (which has no fcntl)."""
+    with open(lock_path, "a+") as f:
+        if os.name == "nt":
+            import msvcrt
+            f.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)  # retries for about 10 s, then raises
+                    break
+                except OSError:
+                    continue
+            try:
+                yield
+            finally:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def raw_mode():
