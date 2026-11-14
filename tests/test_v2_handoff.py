@@ -472,7 +472,7 @@ class BridgeTest(Base):
         import acpmh_bridge as br
         out = br.build_handoff(self.tr, "/Users/me/proj", out=os.path.join(self.d, "h.md"))
         self.assertEqual(out, os.path.join(self.d, "h.md"))
-        self.assertIn("acpmh_home/-Users-kem-proj", _read_text(out))
+        self.assertIn(os.path.join("acpmh_home", "-Users-kem-proj"), _read_text(out))
         cmds = [c[0] for c in self.calls()]
         self.assertEqual(cmds, ["ingest", "build"])
         self.assertEqual(self.calls()[0], ["ingest", "--store", os.path.join(self.d, "acpmh_home", "-Users-kem-proj"), self.tr])
