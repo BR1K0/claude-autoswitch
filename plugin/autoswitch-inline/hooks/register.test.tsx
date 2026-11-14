@@ -232,3 +232,20 @@ test('marks the chat as inline before the router hook runs', async ($, on) => {
   await turn($, 't1', 'hello', 1)
   expect(files[MARKER]).toBe('1\n')
 })
+
+test('passes attached screenshots to the router with the longer image budget', async ($, on) => {
+  const w = world(on, { [SPEED]: 'inline\n' }, () => ({ stdout: hint('claude-opus-5-5') }))
+  const shot = '/tmp/chat/images/1.png'
+  await turn($, 't1', `[Image: source: ${shot}]`)
+  expect(w.asked.length).toBe(1)
+  expect(JSON.parse(w.asked[0]!.stdin).images).toEqual([shot])
+  expect((w.asked[0]!.timeoutMs ?? Infinity) <= 3000).toBe(true)
+  expect(JSON.parse(w.logged[0]!)).toEqual(expect.objectContaining({ turnId: 't1', images: 1 }))
+})
+
+test('an empty prompt with no image file is never sent to the router', async ($, on) => {
+  const w = world(on, { [SPEED]: 'inline\n' }, () => ({ stdout: hint('claude-haiku-5-5') }))
+  await turn($, 't1', '')
+  expect(w.asked.length).toBe(0)
+  expect(w.sent.map(s => s.model)).toEqual([OPUS])
+})

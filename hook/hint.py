@@ -149,6 +149,54 @@ def lost_note(lost):
     return f" | Autoswitch could not re-send your earlier prompt, please send it again: {lost!r}" if lost else ""
 
 
+IMAGE_MARK = re.compile(r"\[Image: source: ([^\]\n]+)\]")
+MAX_IMAGES = 3
+OCR_BUDGET = float(os.environ.get("AUTOSWITCH_OCR_BUDGET", "2.0"))  # seconds for OCR of attached images
+OCR_MIN_CHARS = 20  # an image-only prompt needs at least this much readable text to be routed
+ATTACHED_OCR_CHARS = int(os.environ.get("AUTOSWITCH_ATTACHED_OCR_CHARS", "4000"))
+
+
+def attached_images(hook, prompt):
+    """Paths of the images attached to this message (the plugin sends `images`; the app's `[Image: source: ...]`
+    markers in the text count too). Only existing files, first MAX_IMAGES, in order."""
+    found = []
+    given = hook.get("images")
+    for p in (given if isinstance(given, list) else []) + IMAGE_MARK.findall(prompt or ""):
+        if isinstance(p, str) and p.strip() and p.strip() not in found:
+            found.append(p.strip())
+    return [p for p in found if os.path.isfile(p)][:MAX_IMAGES]
+
+
+def ocr_attached(paths):
+    """Text in the attached images via ACPMH's macOS Vision OCR (AUTOSWITCH_ACPMH, default the bundled acpmh/),
+    in path order. '' when the OCR helper is unavailable (not built, not macOS), it fails, or it takes longer
+    than OCR_BUDGET."""
+    if not paths:
+        return ""
+    try:
+        import threading
+        root = os.path.expanduser(os.environ.get("AUTOSWITCH_ACPMH")
+                                  or os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        if root not in sys.path:
+            sys.path.append(root)  # appended: never shadows the hook's own `images` module
+        from acpmh import images as acpmh_images
+        binpath = getattr(acpmh_images, "BIN", None)
+        if binpath and not os.path.exists(binpath):
+            return ""  # not built: ocr() would run swiftc inside the hook. ACPMH builds it on its own.
+        got = {}
+        t = threading.Thread(target=lambda: got.update(acpmh_images.ocr(paths) or {}), daemon=True)
+        t.start()
+        t.join(OCR_BUDGET)
+        if t.is_alive():
+            return ""
+        texts = [(got.get(p) or "").strip() for p in paths]
+        if not any(texts):
+            texts = [str(v).strip() for v in got.values()]
+        return "\n\n".join(x for x in texts if x)[:ATTACHED_OCR_CHARS]
+    except Exception:
+        return ""
+
+
 DRY = os.environ.get("AUTOSWITCH_DRY") == "1"  # typeahead.py and the inline plugin ask for the decision: print it, change nothing
 HOLD_CHARS = env_num("AUTOSWITCH_HOLD_CHARS", "400", int)
 UPGRADE_MAX_TOKENS = env_num("AUTOSWITCH_UPGRADE_MAX_TOKENS", "100000")
@@ -253,10 +301,18 @@ def main():
                                                          "additionalContext": rollover.part1_context(cont, machine=True)}}))
         return  # agent-to-agent messages and tool/monitor notifications are not the user's prompts
     prompt = sb.bare(raw)  # score and queue the user's text, not the app's wrapper
-    if not prompt:
-        return  # only app-injected text: nothing to route, never block
-    if not clean(prompt) or prompt.lstrip().startswith("/"):
+    shots = attached_images(hook, prompt)
+    prompt = IMAGE_MARK.sub("", prompt).strip() if shots or IMAGE_MARK.search(prompt) else prompt
+    if not shots and (not prompt or not clean(prompt)):
+        return  # only app-injected text and no image: nothing to route, never block (empty text scores as Haiku)
+    if prompt.lstrip().startswith("/"):
         return
+    shot_text = ocr_attached(shots)
+    if not clean(prompt) and len(shot_text.strip()) < OCR_MIN_CHARS:
+        if DRY:
+            print(json.dumps({"target": None, "reason": "screenshot without readable text", "handoff_to": None,
+                              "screenshot": True, "ocr_chars": len(shot_text)}))
+        return  # nothing to score: never route on an empty string
     if ho:
         import handoff
     ctx_on = ho and handoff.context_enabled()
@@ -266,11 +322,13 @@ def main():
     scored = prev_user if prev_user and not ctx_on else clean(prompt)
     followup = bool(prev_user)
     img = None
-    if mode != "off":
+    if shots:
+        img = {"image": True, "text": shot_text}  # attached images (from the plugin): their text is scored like a paste
+    elif mode != "off":
         import images
         img = images.fresh_image(remember=not DRY)  # a pasted screenshot: never block (the re-send would drop it), score its text too
-        if img and img["text"]:
-            scored = f"{scored}\n\n[Text in the attached screenshot]\n{img['text']}"
+    if img and img["text"]:
+        scored = f"{scored}\n\n[Text in the attached screenshot]\n{img['text']}"
     result = _score(scored, model_input)
     label = result["label"]
     confidence = result["probs"][label]
@@ -360,7 +418,8 @@ def main():
                 d = {"target": None, "reason": f"mode is {sb.raw_mode()}: nothing is switched"}
             print(json.dumps({"target": d["target"], "reason": d["reason"], "handoff_to": handoff_to,
                               "current": cur, "app_id": app_id, "label": label, "confidence": round(confidence, 3),
-                              "screenshot": bool(img), "new_chat": bool(new_chat)}))
+                              "screenshot": bool(img), "new_chat": bool(new_chat),
+                              "ocr_chars": len(img["text"]) if img else 0}))
             return
         log = {"ts": time.time(), "mode": mode, "session": app_id, "new_chat": new_chat, "current": cur,
                "label": label, "confidence": round(confidence, 3), "would_target": d["target"],

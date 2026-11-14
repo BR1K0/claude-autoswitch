@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+- **Screenshot-only messages are routed by their text.** The `inline` plugin passes the turn's attached images
+  (the app's `[Image: source: …]` files, first 3) to the hook, which reads their text with ACPMH's macOS Vision
+  OCR (2 s budget) and scores it like a paste. An image with no readable text (under 20 characters) keeps the
+  current model; an empty prompt is never scored. Image turns get a 3 s decision budget instead of 1.5 s.
+- **The band names the exact model** that answered ("↪ Haiku 5.5 answered") and updates on every turn.
+
 ## 0.3.0
 
 Two new speeds that answer the first message on the right model, with no stop notice and no wait.

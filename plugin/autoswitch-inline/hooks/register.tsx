@@ -6,13 +6,17 @@ import type { AutoswitchInlineBudget, AutoswitchInlineLast } from '../types'
 // The router is the installed claude-autoswitch hook (install.sh copies it to ~/.autoswitch/app/hook/hint.py);
 // the mod only asks it, never decides.
 const LIMIT_MS = 1500
+// image turns: hint.py OCRs the screenshots (about 1 s for two) before it scores them
+const IMAGE_LIMIT_MS = 3000
+const MAX_IMAGES = 3
+const IMAGE_MARK = /\[Image: source: ([^\]\n]+)\]/g
 const BUDGETS: readonly AutoswitchInlineBudget[] = ['save', 'balanced', 'quality']
 
 const isActive = atom({ plugin: 'autoswitch-inline', key: 'isActive' } as const, false)
 const budget = atom({ plugin: 'autoswitch-inline', key: 'budget' } as const, 'balanced')
 const last = atom({ plugin: 'autoswitch-inline', key: 'last' } as const, null)
 
-type Context = { prompt: string; sessionId?: string; transcriptPath?: string; cwd?: string }
+type Context = { prompt: string; sessionId?: string; transcriptPath?: string; cwd?: string; imageCount?: number }
 type Hint = { target?: unknown; reason?: unknown; handoff_to?: unknown }
 
 const home = async ($: EngineInterface) => (await $.env.get('HOME')) ?? ''
@@ -60,6 +64,26 @@ const modelName = (id: string) => {
 
 const cap = (word: string) => word[0]!.toUpperCase() + word.slice(1)
 
+const markers = (text: string): string[] => [...text.matchAll(IMAGE_MARK)].map(m => m[1]!.trim()).filter(Boolean)
+
+/**
+ * The image files of this turn's message: the app's `[Image: source: <path>]` markers, in the prompt text and in
+ * the last user message's text blocks (the engine keeps pasted images there as files). First MAX_IMAGES, in order.
+ */
+const findImages = async ($: EngineInterface, text: string): Promise<string[]> => {
+  const found = markers(text)
+  try {
+    const messages = await $.session.messages({ as: 'api' })
+    const lastUser = [...messages].reverse().find(m => m.role === 'user')
+    for (const block of lastUser?.content ?? []) {
+      if (block.type === 'text' && typeof block.text === 'string') found.push(...markers(block.text))
+    }
+  } catch {
+    // no transcript to read: the markers in the prompt are all there is
+  }
+  return [...new Set(found)].slice(0, MAX_IMAGES)
+}
+
 const parseHint = (stdout: string): Hint | null => {
   const lines = stdout.split('\n').map(l => l.trim()).filter(Boolean)
   const line = lines.at(-1)
@@ -77,7 +101,9 @@ const ask = async (
   $: EngineInterface,
   ctx: Context,
   model: string,
+  images: readonly string[] = [],
 ): Promise<{ target: string | null; reason: string; ms: number }> => {
+  const limit = images.length > 0 ? IMAGE_LIMIT_MS : LIMIT_MS
   const startedAt = await $.clock.now()
   const elapsed = async () => (await $.clock.now()) - startedAt
   try {
@@ -101,11 +127,12 @@ const ask = async (
         session_id: sessionId,
         transcript_path: transcriptPath,
         cwd,
+        ...(images.length > 0 ? { images } : {}),
       }),
-      timeoutMs: LIMIT_MS,
+      timeoutMs: limit,
     })
     const ms = await elapsed()
-    if (ms > LIMIT_MS) return { target: null, reason: `router too slow (${ms} ms)`, ms }
+    if (ms > limit) return { target: null, reason: `router too slow (${ms} ms)`, ms }
     if (ran.exitCode !== 0) return { target: null, reason: `router exited ${ran.exitCode}`, ms }
     const hint = parseHint(ran.stdout)
     if (hint === null) return { target: null, reason: 'router gave no decision', ms }
@@ -145,7 +172,10 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', ($, e, next) => {
-    if (e.command === undefined && e.isMeta !== true) pending = { ...pending, prompt: e.text }
+    if (e.command === undefined && e.isMeta !== true) {
+      const imageCount = (e.attachments ?? []).filter(a => a.type === 'image').length
+      pending = { ...pending, prompt: e.text, imageCount }
+    }
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -160,6 +190,7 @@ export const register: Register = on => {
         // no marker: the hook falls back, nothing breaks
       }
       pending = {
+        ...pending,
         prompt: e.prompt,
         sessionId: e.session_id,
         transcriptPath: e.transcript_path || undefined,
@@ -185,13 +216,26 @@ export const register: Register = on => {
       const ctx = prompts.get(e.turnId)
       prompts.delete(e.turnId)
       let chosen: string | null = null
-      if ((await refresh($)) && ctx !== undefined && ctx.prompt !== '') {
-        const got = await ask($, ctx, e.model)
+      let reason = 'router inert'
+      if (await refresh($)) {
+        const text = ctx?.prompt ?? ''
+        const images = text === '' || text.includes('[Image: source:') ? await findImages($, text) : []
+        let got = { target: null as string | null, reason: 'no prompt seen', ms: 0, images: images.length }
+        if (ctx !== undefined && text === '' && images.length === 0) {
+          got = { ...got, reason: (ctx.imageCount ?? 0) > 0 ? 'images with no file to read' : 'empty prompt' }
+        } else if (ctx !== undefined) {
+          got = { ...(await ask($, ctx, e.model, images)), images: images.length }
+        }
         chosen = got.target !== null && got.target !== e.model ? got.target : null
-        const row: AutoswitchInlineLast = { turnId: e.turnId, from: e.model, to: chosen, reason: got.reason }
-        await update($, last, () => row)
-        await log($, { ts: (await $.clock.now()) / 1000, turnId: e.turnId, from: e.model, to: chosen, reason: got.reason, ms: got.ms })
+        reason = got.reason
+        await log($, {
+          ts: (await $.clock.now()) / 1000, turnId: e.turnId, from: e.model, to: chosen, reason, ms: got.ms,
+          ...(got.images > 0 ? { images: got.images } : {}),
+        })
       }
+      // every main-loop turn, asked or not: the band never shows an earlier turn's model
+      const row: AutoswitchInlineLast = { turnId: e.turnId, from: e.model, to: chosen, reason }
+      await update($, last, () => row)
       models.set(e.turnId, chosen)
       while (models.size > 50) models.delete(models.keys().next().value!)
     }
