@@ -492,7 +492,11 @@ class T(unittest.TestCase):
         self._watch(AUTOSWITCH_SWEEP_EVERY="3")
         self.assertEqual(self._done("abc123")["status"], "error")
         self.assertFalse(os.path.exists(c))
-        self.assertIn("stranded", _read_json(os.path.join(self.d, "lost", "newchat.json"))["prompt"])
+        lost = os.path.join(self.d, "lost", "newchat.json")
+        for _ in range(40):  # written just after the request closes
+            if os.path.exists(lost): break
+            time.sleep(0.1)
+        self.assertIn("stranded", _read_json(lost)["prompt"])
         self.assertGreater(os.path.getmtime(hb), time.time() - 30)
 
     def test_sweep_finishes_a_stranded_ok_close_as_ok_without_a_resend_note(self):

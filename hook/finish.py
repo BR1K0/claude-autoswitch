@@ -86,6 +86,16 @@ def _claim(src, dst, tries=40):
     return False
 
 
+def _write_lost(cli_session_id, note):
+    """lost/<chat id>.json, written whole (temp file + replace): the hook never reads a half-written note."""
+    os.makedirs(q.path("lost"), exist_ok=True)
+    dest = q.path("lost", cli_session_id + ".json")
+    tmp = "%s.%d.tmp" % (dest, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(note, f)
+    os.replace(tmp, dest)
+
+
 def _lock(dest):
     """Exclusive claim marker done/<id>.json.lock (O_EXCL). The rename alone is not exclusive on Windows:
     two processes renaming the same file at once can both succeed, the second moving it from the first's name."""
@@ -140,9 +150,7 @@ def _mark_done(req_path, req, status="ok", keep_token=False):
     if req["status"] != "ok":
         if req["status"] in ("error", "unresolved", "lost") and req.get("cli_session_id"):
             # the user was told "switching" but nothing was sent: the hook shows this on their next prompt
-            os.makedirs(q.path("lost"), exist_ok=True)
-            with open(q.path("lost", req["cli_session_id"] + ".json"), "w", encoding="utf-8") as f:
-                json.dump({"prompt": req["prompt"][:500], "ts": time.time(), "id": req.get("id")}, f)
+            _write_lost(req["cli_session_id"], {"prompt": req["prompt"][:500], "ts": time.time(), "id": req.get("id")})
     return True
 
 
@@ -201,9 +209,7 @@ def done_unparseable(req_path):
     then keep the file as done/<name>.bad. Returns True if a note was written."""
     info = salvage(req_path)
     if info:
-        os.makedirs(q.path("lost"), exist_ok=True)
-        with open(q.path("lost", info["cli_session_id"] + ".json"), "w", encoding="utf-8") as f:
-            json.dump({"prompt": info["prompt"][:500] or "(prompt unreadable)", "ts": time.time()}, f)
+        _write_lost(info["cli_session_id"], {"prompt": info["prompt"][:500] or "(prompt unreadable)", "ts": time.time()})
     os.makedirs(q.path("done"), exist_ok=True)
     os.replace(req_path, q.path("done", os.path.basename(req_path) + ".bad"))
     return bool(info)
