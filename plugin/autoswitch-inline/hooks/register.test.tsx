@@ -411,3 +411,13 @@ test('a pinned chat runs on the app setting, not on the last pick', async ($, on
   await runStep($, { turnId: 't2', index: 0, model: OLD })
   expect(w.sent.map(s => s.model)).toEqual([OPUS, OLD])
 })
+
+test('a cheaper model is not kept: an unscored turn after a Haiku turn goes back to the app model', async ($, on) => {
+  let n = 0
+  const w = world(on, { [SPEED]: 'inline' }, () => (++n === 1 ? { stdout: hint('claude-haiku-5-5') } : { stdout: '' }))
+  await $.turn.start({ text: 'what is 2+2', turnId: 't1' })
+  await runStep($, { turnId: 't1', index: 0, model: OLD })  // same app setting on both turns: no hand change
+  await notification($, 't2')
+  expect(w.sent.map(s => s.model)).toEqual(['claude-haiku-5-5', OLD])
+  expect(w.asked[1]!.env.AUTOSWITCH_CURRENT_MODEL).toBe(OLD)
+})

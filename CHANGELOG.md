@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.3
+
+- **A cheaper model never carries over between turns.** 0.3.2 kept unscored turns on the previous turn's model; after
+  an easy message went to Haiku, a harder message the router was unsure about (or a router failure) could stay on
+  Haiku. Now only a move up, or to a newer version of the same tier, carries over; every Haiku turn needs the
+  router's fresh yes, and anything else goes back to the chat's model.
+
 ## 0.3.2
 
 - **No more model bouncing in long chats.** Turns the router does not score (task notifications, background
