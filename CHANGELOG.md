@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.6
+
+- **The newest part is listed first.** A chat's sidebar group is now sorted by creation date, newest on top, so
+  the part you're working in is the easiest to reach. Sorted by recency, part 1 sat on top because its
+  "Continued in part N" reply was the last thing posted.
+
 ## 0.3.5
 
 - **A dev server no longer holds a chat past the rollover point.** A running background command used to block the

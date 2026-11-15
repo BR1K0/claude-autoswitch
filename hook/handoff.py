@@ -256,7 +256,8 @@ def group_step(rec):
     return (f"get_session \"self\": if this chat is in a custom sidebar group, use that group. Otherwise list_groups "
             f"and use the group named \"{base}\", or create_group \"{base}\" if there is none, and move_sessions "
             f"this chat (\"self\") into it too (if that is refused because this chat is nested, leave this chat where "
-            f"it is). Then move_sessions the new session into that group.")
+            f"it is). Then move_sessions the new session into that group, and set_view with section_id that group's id "
+            f"and sort_by \"created\", so the newest part is listed first.")
 
 
 def instruction(rec):
