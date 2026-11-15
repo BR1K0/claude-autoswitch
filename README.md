@@ -1,14 +1,14 @@
 # Claude Auto Switch (Mac and Windows)
 
-**Claude Code desktop picks the cheapest model that can handle each prompt: Haiku for the quick stuff, Opus only when it matters.**
+**Claude Code desktop picks the lightest model that can handle each prompt (Haiku for the quick stuff, Opus only when it matters), so the same work uses less of your plan's usage and your limits last longer.**
 
 A tiny local classifier reads every prompt you send. If a different model would do the job, that prompt is answered by it, automatically. Nothing leaves your machine.
 
 ![The autoswitch-inline band above the prompt box: "↪ Opus 5.5 (kept) · Budget: Balanced [Save] [✓ Balanced] [Quality]"](docs/switch-demo.png)
 
-*Pick a budget mode in the band above the prompt box; here is what each one saved and risked on 66 held-out test prompts ([how we measured](#what-each-mode-costs-you)):*
+*Pick a budget mode in the band above the prompt box; here is how much less usage each one needed, and what it risked, on 66 held-out test prompts ([how we measured](#what-each-mode-costs-you)):*
 
-| Budget mode | Saved vs always Opus (start on Opus / start on Haiku) | Hard questions sent to a weaker model | Overspend (stronger model than needed) |
+| Budget mode | Less usage than always Opus (start on Opus / start on Haiku) | Hard questions sent to a weaker model | Overspend (stronger model than needed) |
 |---|---|---|---|
 | Save | 29% / 35% | 6% / 12% | 41% / 36% |
 | Balanced (default) | 26% / 33% | 6% / 6% | 45% / 36% |
@@ -16,7 +16,9 @@ A tiny local classifier reads every prompt you send. If a different model would 
 | *for comparison: always Sonnet* | *38%* | *100%* | *55%* |
 | *always Haiku* | *97%* | *100%* | *0%* |
 
-> Measured on 150 real SWE-bench bugs: starting on Haiku and escalating only when needed cost **$0.055 per issue**, against about **$0.129** per Opus attempt ([numbers and caveats](#what-it-saves)).
+> Measured on 150 real SWE-bench bugs: starting on Haiku and escalating only when needed used **about 57% less** per issue than an Opus attempt ([numbers and caveats](#what-it-saves)).
+
+> **What "usage" means here.** Token usage weighted by each model's API list price, so a token of Opus counts for more than a token of Haiku, and a cached re-read counts for far less than fresh input. On a Pro or Max plan your bill stays the same; what you get is more work before you hit your 5-hour and weekly limits. Anthropic doesn't publish exactly how those limits are counted, but bigger models and longer chats use them up faster too, so read these percentages as estimates of how much further your limits go, not money back. On API keys they are money.
 
 > **Works only in the Code tab of the Claude desktop app** (a Local session on your own computer). It does not work in normal Chat, Cowork, claude.ai in a browser, or Cloud sessions: those have no hooks and no access to your files. No **Code** tab in your app? Update the app first; if it is still missing, Auto Switch can't run on your account.
 
@@ -97,30 +99,30 @@ Nothing is ever lost silently: if anything fails, the prompt goes through unchan
 
 ## What it saves
 
-150 SWE-bench bug-fix tasks, each run by a real agent on Haiku, then Sonnet, then Opus until one solved it (the cascade). Cost is measured API spend.
+150 SWE-bench bug-fix tasks, each run by a real agent on Haiku, then Sonnet, then Opus until one solved it (the cascade). Usage is measured API spend, shown against one Opus attempt (= 100%; $0.129 at list prices).
 
-| Strategy | Cost per issue | Solved |
+| Strategy | Usage per issue | Solved |
 |---|---|---|
-| **Haiku first, escalate if it fails** | **$0.055** | 130 / 150 |
-| Haiku only | $0.012 | 103 / 150 (69%) |
-| Opus attempt (mean over the 34 runs) | ~$0.129 | n/a |
+| **Haiku first, escalate if it fails** | **43%** (57% less) | 130 / 150 |
+| Haiku only | 9% | 103 / 150 (69%) |
+| Opus attempt (mean over the 34 runs) | 100% | n/a |
 
 - Of the 150, Haiku solved 103, Sonnet solved 13 of the rest and Opus solved 14 of the 34 it was given. Haiku alone solved 103 of 150, so most of the work never needed a bigger model.
 - The classifier picks a starting model up front (instead of always starting on Haiku) to skip hopeless first attempts. On a small held-out check (30 issues) it did no better than always guessing Haiku, so treat it as a cheap prior, not an oracle.
 
 **Honest caveats**
-- The Opus figure comes from the 34 issues where Haiku and Sonnet had already failed, i.e. the hardest ones. Opus on the easy 116 would cost less, so "2.3x cheaper than always-Opus" overstates the saving. Real-world savings depend on your mix of prompts.
+- The Opus figure comes from the 34 issues where Haiku and Sonnet had already failed, i.e. the hardest ones. Opus on the easy 116 would cost less, so "57% less than always-Opus" overstates the saving. Real-world savings depend on your mix of prompts.
 - This is an agent fixing bugs, not interactive chat. Prompts in a chat are shorter, and the cost of re-caching a switched chat is *not* in these numbers (the policy models it with estimates).
-- **Switching itself costs money.** Each model keeps its own prompt cache, so after a switch the history is re-read at full price. At published Anthropic prompt-caching rates, re-caching a 50k-token chat costs about $0.006 on Haiku, $0.125 on Sonnet and $0.25 on Opus. That is why long chats stay put. The policy's per-answer savings and the Haiku re-cache figure are rough estimates that haven't been calibrated.
-- The cost per issue is spend, not spend per *solved* issue. There is no measured always-Sonnet or always-Opus run on all 150.
+- **Switching itself uses some up.** Each model keeps its own prompt cache, so after a switch the history is re-read at full price. Re-caching a 50k-token chat uses about as much as 10 ordinary Opus messages on Opus, half that on Sonnet, and almost nothing on Haiku (about 1/40 of the Opus figure). That is why long chats stay put. The policy's per-answer savings and the Haiku re-cache figure are rough estimates that haven't been calibrated.
+- The usage per issue is spend, not spend per *solved* issue. There is no measured always-Sonnet or always-Opus run on all 150.
 - 150 tasks from open-source Python repositories. Your work may look different. That is why shadow mode exists: measure on your own prompts first.
 
 ## What each mode costs you
 
 The table at the top, in plain words: **no mode ever put a hard question on Haiku**; the risk is a hard question
-answered by Sonnet instead of Opus (1 or 2 of 17 here). **The saving is a quarter to a third of Opus's cost, not
-more**, because the scorer sends most easy coding work to Sonnet or Opus anyway, and Sonnet costs 62% of Opus per
-message. On the public scorer the three modes barely differ; which model the chat starts on matters more.
+answered by Sonnet instead of Opus (1 or 2 of 17 here). **It uses a quarter to a third less than always-Opus, not
+more**, because the scorer sends most easy coding work to Sonnet or Opus anyway, and a Sonnet message uses 62% of an
+Opus one. On the public scorer the three modes barely differ; which model the chat starts on matters more.
 
 **Careful with save mode on a less confident scorer.** On a second scorer (the maintainer's personal one) a chat
 starting on Haiku in save mode sent **all 17 hard questions to Sonnet**, and balanced 9 of 17; only quality kept them
@@ -129,7 +131,7 @@ on Opus. If your hard questions matter, use balanced or quality.
 **How we measured.** 66 labelled prompts the scorer was not trained on: 36 design/architecture questions from
 `data/design_test.jsonl` (6 haiku, 13 sonnet, 17 opus) and 30 small coding tasks Haiku had already solved. Each went
 through the real decision path (`policy.decide` with the mode's gates, a short chat) from a chat on Opus 5.5 and
-one on Haiku 5.5. Cost: a typical message of 30k cached context, 1k new input and 800 output, at Opus 5.5 $4/$20,
+one on Haiku 5.5. Usage: a typical message of 30k cached context, 1k new input and 800 output, at Opus 5.5 $4/$20,
 Sonnet 5.5 $2/$10 (cache reads $0.20) and Haiku 5.5 $0.10/$0.50 (cache read assumed $0.01). With 150k of context the
 savings shrink by about a third (19-24% for save). Limits: these are not your prompts; 17 hard questions is a small
 sample (one prompt = 6 points); labels are coarse; and **the scorer is the weak link**: it is right 94% of the time on
@@ -150,8 +152,7 @@ up in the journal.
 | 70k-300k | new chat with the v4 handoff | v4 handoff | switch in place |
 | over 300k | v5b handoff | v5 handoff | v4 handoff |
 
-In the benchmark ([docs/BENCHMARK.md](docs/BENCHMARK.md)) a handoff scored 94-99% of re-reading at a half to a fifth
-of the cost; compaction never won. A handoff only happens for a **lasting** switch (a new task, or two messages in a
+In the benchmark ([docs/BENCHMARK.md](docs/BENCHMARK.md)) a handoff scored 94-99% of re-reading while using 50-80% less; compaction never won. A handoff only happens for a **lasting** switch (a new task, or two messages in a
 row wanting the other model); a one-off message in a long chat stays put.
 
 Also in v2:
