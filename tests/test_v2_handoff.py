@@ -874,3 +874,11 @@ class QualityRereadTest(unittest.TestCase):
         self.assertEqual(handoff.plan("haiku", "opus", size, "haiku", False, "balanced")["action"], "handoff")
         big = {"tokens": 900000, "method": "precise"}
         self.assertEqual(handoff.plan("haiku", "opus", big, "haiku", False, "quality")["action"], "handoff")
+
+
+class GroupSortTest(unittest.TestCase):
+    def test_group_step_lists_newest_part_first(self):
+        import handoff
+        s = handoff.group_step({"base_title": "Chat"})
+        self.assertIn('sort_by "created"', s)
+        self.assertLess(s.index("move_sessions the new session"), s.index("set_view"))
