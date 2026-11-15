@@ -199,7 +199,10 @@ def ocr_attached(paths):
 
 DRY = os.environ.get("AUTOSWITCH_DRY") == "1"  # typeahead.py and the inline plugin ask for the decision: print it, change nothing
 HOLD_CHARS = env_num("AUTOSWITCH_HOLD_CHARS", "400", int)
-UPGRADE_MAX_TOKENS = env_num("AUTOSWITCH_UPGRADE_MAX_TOKENS", "100000")
+# No size limit by default: the tier's newest model costs less per token (Opus 5.5 $4/$20, cache reads $0.20, against
+# Opus 4.x $5/$25 and $0.50), so the one re-read it costs (1.25 x $4 per million tokens) is paid back after about 17
+# model calls whatever the chat's size, two or three messages in a chat that runs tools. The plugin keeps it there.
+UPGRADE_MAX_TOKENS = env_num("AUTOSWITCH_UPGRADE_MAX_TOKENS", "inf")
 TIERS = ("haiku", "sonnet", "opus")
 
 
@@ -369,6 +372,11 @@ def main():
             pins.observe(app_id, cur)  # remembers the model seen; a change nobody here made pins the chat
         new_chat = not info and first_prompt(hook.get("transcript_path"))
         pinned = bool(app_id) and pins.is_pinned(hook.get("session_id"), app_id, cur, hook.get("transcript_path"))
+        if DRY and os.environ.get("AUTOSWITCH_CURRENT_MODEL"):
+            # the inline plugin runs this chat on its own pick, which the app's setting (info["model"]) does not show:
+            # decide from the model the chat really runs on, so a long chat is not moved back to the app's model.
+            # Pins above keep using the app's setting: that is where a hand pick shows.
+            cur = os.environ["AUTOSWITCH_CURRENT_MODEL"]
         handoff_to = None
         if ho:
             import budget
@@ -409,7 +417,7 @@ def main():
         if (not d["target"] and not pinned and not handoff_to and app_id and carryable(prompt)
                 and not (info and info["sessionId"] != app_id)):
             # staying in this tier: move an older version (Opus 4.7, Sonnet 5...) to the tier's current model,
-            # which is newer and cheaper. Not in a long chat: the first message on a new model re-reads it all.
+            # which is newer and cheaper, in a long chat too (see UPGRADE_MAX_TOKENS).
             have = cur or os.environ.get("AUTOSWITCH_CURRENT_MODEL")  # the plugin passes the model a new chat runs on
             newer = policy.latest_in_tier(have)
             length = size["tokens"] if ho else tokens

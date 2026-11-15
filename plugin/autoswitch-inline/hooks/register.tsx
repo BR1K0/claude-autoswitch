@@ -230,6 +230,11 @@ export const register: Register = on => {
   let pending: Context | null = null
   const prompts = new Map<string, Context>()
   const models = new Map<string, string | null>()
+  // The model the last main-loop turn ran on, and the app's setting then. Turns the router has no word on (task
+  // notifications, a router error) stay on it: going back to the app's setting would re-read the whole chat on
+  // another model. A change of the app's setting is a hand pick and starts over from it.
+  let running: string | null = null
+  let appModel: string | null = null
   const python: PythonCache = { argv: null }
 
   on('session.start', async ($, e, next) => {
@@ -284,6 +289,9 @@ export const register: Register = on => {
       prompts.delete(e.turnId)
       let chosen: string | null = null
       let reason = 'router inert'
+      if (appModel !== e.model) running = null
+      appModel = e.model
+      const base = running ?? e.model
       if (await refresh($)) {
         const text = ctx?.prompt ?? ''
         const images = text === '' || text.includes('[Image: source:') ? await findImages($, text) : []
@@ -291,14 +299,18 @@ export const register: Register = on => {
         if (ctx !== undefined && text === '' && images.length === 0) {
           got = { ...got, reason: (ctx.imageCount ?? 0) > 0 ? 'images with no file to read' : 'empty prompt' }
         } else if (ctx !== undefined) {
-          got = { ...(await ask($, ctx, e.model, python, images)), images: images.length }
+          got = { ...(await ask($, ctx, base, python, images)), images: images.length }
         }
-        chosen = got.target !== null && got.target !== e.model ? got.target : null
-        reason = got.reason
+        const run = got.reason.startsWith('pinned') ? e.model : (got.target ?? base)
+        chosen = run !== e.model ? run : null
+        reason = got.target === null && run !== e.model ? `${got.reason}; stays on ${modelName(run)}` : got.reason
+        running = run
         await log($, {
           ts: (await $.clock.now()) / 1000, turnId: e.turnId, from: e.model, to: chosen, reason, ms: got.ms,
           ...(got.images > 0 ? { images: got.images } : {}),
         })
+      } else {
+        running = null
       }
       // every main-loop turn, asked or not: the band never shows an earlier turn's model
       const row: AutoswitchInlineLast = { turnId: e.turnId, from: e.model, to: chosen, reason }

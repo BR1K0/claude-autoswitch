@@ -100,7 +100,7 @@ const OPUS = 'claude-opus-5-5'
 
 const runStep = async (
   $: Engine,
-  input: { turnId: string; index: number; agentId?: string },
+  input: { turnId: string; index: number; agentId?: string; model?: string },
 ) => {
   const stream = $.turn.step({ model: OPUS, messageCount: 1, ...input })
   for await (const _ of stream) {
@@ -370,4 +370,44 @@ test('an empty prompt with no image file is never sent to the router', async ($,
   await turn($, 't1', '')
   expect(w.asked.length).toBe(0)
   expect(w.sent.map(s => s.model)).toEqual([OPUS])
+})
+
+const OLD = 'claude-opus-4-7'
+
+// A turn the router has no word on (a task notification), on an app still set to OLD.
+const notification = async ($: Engine, turnId: string) => {
+  await $.turn.start({ text: '<task-notification>done</task-notification>', turnId })
+  await runStep($, { turnId, index: 0, model: OLD })
+}
+
+test('turns the router has no word on stay on the model the last turn ran on', async ($, on) => {
+  let n = 0
+  const w = world(on, { [SPEED]: 'inline' }, () => (++n === 1 ? { stdout: hint(OPUS) } : { stdout: '' }))
+  await $.classic.UserPromptSubmit({ prompt: 'design it', session_id: 'cli-session', transcript_path: '/t/cli-session.jsonl', cwd: '/work' })
+  await $.turn.start({ text: 'design it', turnId: 't1' })
+  await runStep($, { turnId: 't1', index: 0, model: OLD })
+  await notification($, 't2')
+  await notification($, 't3')
+  expect(w.sent.map(s => s.model)).toEqual([OPUS, OPUS, OPUS])
+  expect(w.asked[1]!.env.AUTOSWITCH_CURRENT_MODEL).toBe(OPUS) // the router decides from the model really in use
+})
+
+test('a hand change of the app model starts over from it', async ($, on) => {
+  const w = world(on, { [SPEED]: 'inline' }, () => ({ stdout: '' }))
+  await $.turn.start({ text: 'a', turnId: 't1' })
+  await runStep($, { turnId: 't1', index: 0, model: OLD })
+  await $.turn.start({ text: 'b', turnId: 't2' })
+  await runStep($, { turnId: 't2', index: 0, model: 'claude-haiku-5-5' })
+  expect(w.sent.map(s => s.model)).toEqual([OLD, 'claude-haiku-5-5'])
+})
+
+test('a pinned chat runs on the app setting, not on the last pick', async ($, on) => {
+  let n = 0
+  const pinned = `${JSON.stringify({ target: null, reason: 'pinned: model was picked by hand', handoff_to: null })}\n`
+  const w = world(on, { [SPEED]: 'inline' }, () => (++n === 1 ? { stdout: hint(OPUS) } : { stdout: pinned }))
+  await $.turn.start({ text: 'a', turnId: 't1' })
+  await runStep($, { turnId: 't1', index: 0, model: OLD })
+  await $.turn.start({ text: 'b', turnId: 't2' })
+  await runStep($, { turnId: 't2', index: 0, model: OLD })
+  expect(w.sent.map(s => s.model)).toEqual([OPUS, OLD])
 })

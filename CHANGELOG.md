@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.2
+
+- **No more model bouncing in long chats.** Turns the router does not score (task notifications, background
+  results, a router error) now stay on the model the previous turn ran on, instead of going back to the chat's
+  model setting. Each bounce re-read the whole chat on the other model; in one measured project this cost more
+  than running everything on Opus 5.5. The hook also decides from the model the plugin really runs the chat on.
+  Picking a model by hand still takes over at once.
+- **Long chats move to the tier's newest model too** (Opus 4.7 to Opus 5.5). It is cheaper per token, so the one
+  re-read pays back in about 17 model calls whatever the chat's size. `AUTOSWITCH_UPGRADE_MAX_TOKENS` still sets a cap.
+
 ## 0.3.1
 
 - **Screenshot-only messages are routed by their text.** The `inline` plugin passes the turn's attached images
