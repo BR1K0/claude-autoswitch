@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.7
+
+- **Handoffs never use an API key.** The handoff ran ACPMH's Haiku fact extraction, billed to your API key, whenever
+  `ANTHROPIC_API_KEY` was set in the shell, without saying so. A key being set is not consent: handoffs no longer
+  run it, and the key is removed from ACPMH's processes. `acpmh.cli sync` itself now refuses unless
+  `ACPMH_SYNC_API=on`.
+- **Keys are redacted from everything ACPMH stores**, not only screenshot text: every event and tool output.
+
 ## 0.3.6
 
 - **The newest part is listed first.** A chat's sidebar group is now sorted by creation date, newest on top, so

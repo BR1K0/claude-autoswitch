@@ -1,6 +1,6 @@
 """Strip keys, tokens and passwords from text before it is stored.
 
-Used on text ACPMH derives itself (OCR of screenshots). A redacted value is
+Used on everything ACPMH stores: every event summary and body, and OCR of screenshots. A redacted value is
 replaced by [REDACTED <kind>], so the text still says what was there.
 """
 import re
