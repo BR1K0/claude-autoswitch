@@ -78,6 +78,24 @@ const tierOf = (id: string): number | null => {
   const m = /(haiku|sonnet|opus)/i.exec(id)
   return m ? TIERS.indexOf(m[1]!.toLowerCase() as (typeof TIERS)[number]) : null
 }
+// Each tier's current model (policy.MODELS in the router). A turn never runs on an older version of its tier:
+// the app's setting can still say Opus 4.7 (a chat made before the newest model), and turns the router has no
+// word on (task notifications, side-session reports, a pinned or failed answer) used to fall back to it. Every
+// such fall-back and the next step back re-read the whole chat into a new cache.
+const NEWEST: Record<(typeof TIERS)[number], string> = {
+  haiku: 'claude-haiku-5-5',
+  sonnet: 'claude-sonnet-5-5',
+  opus: 'claude-opus-5-5',
+}
+/** The tier's current model for an older version of it (keeping a context suffix such as [1m]), else the id. */
+const newest = (id: string): string => {
+  const t = tierOf(id)
+  if (t === null) return id
+  const current = NEWEST[TIERS[t]!]
+  if (id === current || id.startsWith(`${current}[`)) return id
+  const suffix = /\[[^\]]*\]$/.exec(id)?.[0] ?? ''
+  return `${current}${suffix}`
+}
 // The last turn's model is kept only when it is at least as strong as the app's: a cheaper model needs a fresh
 // yes from the router every turn. Otherwise an unsure or failed router answer would leave a hard message on Haiku
 // just because the turn before was easy.
@@ -318,7 +336,8 @@ export const register: Register = on => {
         } else if (ctx !== undefined) {
           got = { ...(await ask($, ctx, base, python, images)), images: images.length }
         }
-        const run = got.reason.startsWith('pinned') ? e.model : (got.target ?? base)
+        // a pin keeps the tier picked by hand, on its current version
+        const run = newest(got.reason.startsWith('pinned') ? e.model : (got.target ?? base))
         chosen = run !== e.model ? run : null
         reason = got.target === null && run !== e.model ? `${got.reason}; stays on ${modelName(run)}` : got.reason
         running = run

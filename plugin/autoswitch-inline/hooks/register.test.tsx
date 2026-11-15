@@ -398,10 +398,10 @@ test('a hand change of the app model starts over from it', async ($, on) => {
   await runStep($, { turnId: 't1', index: 0, model: OLD })
   await $.turn.start({ text: 'b', turnId: 't2' })
   await runStep($, { turnId: 't2', index: 0, model: 'claude-haiku-5-5' })
-  expect(w.sent.map(s => s.model)).toEqual([OLD, 'claude-haiku-5-5'])
+  expect(w.sent.map(s => s.model)).toEqual([OPUS, 'claude-haiku-5-5']) // OLD itself never runs: its tier's newest does
 })
 
-test('a pinned chat runs on the app setting, not on the last pick', async ($, on) => {
+test('a pinned chat keeps the app setting\'s tier, on its newest version', async ($, on) => {
   let n = 0
   const pinned = `${JSON.stringify({ target: null, reason: 'pinned: model was picked by hand', handoff_to: null })}\n`
   const w = world(on, { [SPEED]: 'inline' }, () => (++n === 1 ? { stdout: hint(OPUS) } : { stdout: pinned }))
@@ -409,7 +409,31 @@ test('a pinned chat runs on the app setting, not on the last pick', async ($, on
   await runStep($, { turnId: 't1', index: 0, model: OLD })
   await $.turn.start({ text: 'b', turnId: 't2' })
   await runStep($, { turnId: 't2', index: 0, model: OLD })
-  expect(w.sent.map(s => s.model)).toEqual([OPUS, OLD])
+  expect(w.sent.map(s => s.model)).toEqual([OPUS, OPUS])
+})
+
+test('a turn never falls back to an older version of its tier', async ($, on) => {
+  // a chat still set to Opus 4.7: notifications and failed answers used to run on 4.7 between Opus 5.5 turns,
+  // re-writing the whole chat's cache at each flip
+  let n = 0
+  const answers = ['', 'fail', hint(null)]
+  const w = world(on, { [SPEED]: 'inline' }, () => {
+    const a = answers[n++]
+    return a === 'fail' ? 'fail' : { stdout: a ?? '' }
+  })
+  await notification($, 't1')
+  await notification($, 't2')
+  await notification($, 't3')
+  expect(w.sent.map(s => s.model)).toEqual([OPUS, OPUS, OPUS])
+})
+
+test('older Sonnet and Haiku versions move up too, keeping a context suffix', async ($, on) => {
+  const w = world(on, { [SPEED]: 'inline' }, () => ({ stdout: '' }))
+  for (const [i, model] of ['claude-sonnet-4-5', 'claude-haiku-4-5', 'claude-opus-4-7[1m]', 'claude-fable-5-2'].entries()) {
+    await $.turn.start({ text: 'x', turnId: `t${i}` })
+    await runStep($, { turnId: `t${i}`, index: 0, model })
+  }
+  expect(w.sent.map(s => s.model)).toEqual(['claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-5-5[1m]', 'claude-fable-5-2'])
 })
 
 test('a cheaper model is not kept: an unscored turn after a Haiku turn goes back to the app model', async ($, on) => {
@@ -418,6 +442,6 @@ test('a cheaper model is not kept: an unscored turn after a Haiku turn goes back
   await $.turn.start({ text: 'what is 2+2', turnId: 't1' })
   await runStep($, { turnId: 't1', index: 0, model: OLD })  // same app setting on both turns: no hand change
   await notification($, 't2')
-  expect(w.sent.map(s => s.model)).toEqual(['claude-haiku-5-5', OLD])
+  expect(w.sent.map(s => s.model)).toEqual(['claude-haiku-5-5', OPUS])  // back to the app's tier, newest version
   expect(w.asked[1]!.env.AUTOSWITCH_CURRENT_MODEL).toBe(OLD)
 })

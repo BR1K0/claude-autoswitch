@@ -299,6 +299,12 @@ def main():
         sb.take_lost(hook.get("session_id"), rid)  # it did arrive (maybe after settle timed out): drop "please resend"
         return  # re-sent by the Watcher: loop guard, route nothing
     if machine_traffic(raw):
+        if ho and not DRY:
+            import successor
+            quiet = successor.hook_output(raw, host_session_id())
+            if quiet:  # only the next part reporting in: don't wake this old part (it would re-read its whole chat)
+                print(json.dumps(quiet))
+                return
         if ro:  # a continued part 1 still gets events (monitors, linked sessions): never do part 2's work here
             cont = rollover.continued(host_session_id()) if host_session_id() else None
             if cont:
@@ -386,7 +392,8 @@ def main():
             pts = budget.calibration()
             conf_used = budget.calibrate(confidence, pts)
             ext.update(budget_mode=bmode, pace=pace_note, calibrated=bool(pts), size_cheap=_int(size["cheap"]),
-                       size_precise=_int(size["precise"]), size_method=size["method"])
+                       size_precise=_int(size["precise"]), size_method=size["method"],
+                       size_exact_total=_int(size.get("exact_total")), size_start=_int(size.get("start")))
         if not app_id:
             d = {"target": None, "reason": "not a desktop app chat: never blocked"}
         elif pinned:
@@ -552,7 +559,7 @@ def _decide_v2(label, confidence, cur, size, pinned, mode, info, hook, bmode, pt
     free = policy.decide(label, confidence, cur, tokens, pinned, enforce=enforce, is_new=is_new, overrides=ov,
                          dwell=False)
     tgt_tier = policy.tier_of(free["target"])
-    if tgt_tier and size["method"] != "precise" and tokens is not None \
+    if tgt_tier and size["method"] not in ("precise", "exact") and tokens is not None \
             and tokens >= handoff.breakeven(tgt_tier) * (1 - policy._f("AUTOSWITCH_ZONE", "0.10")):
         size.update(sizes.estimate(hook.get("transcript_path"), force_precise=True))  # the zone: count precisely
         tokens = size["tokens"]

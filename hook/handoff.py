@@ -68,7 +68,8 @@ def breakeven(tier):
 
 def plan(target_tier, cur_tier, size, prev_want=None, starts_new_task=False, budget_mode=None):
     """Pure. {"action": "inplace" | "handoff" | "stay", "reason", "zone"}.
-    target_tier: the tier the gates want (dwell guard not applied), or None. size: sizes.estimate()."""
+    target_tier: the tier the gates want (dwell guard not applied), or None. size: sizes.estimate() (message
+    tokens; "precise" or "exact" may decide near break-even)."""
     if not target_tier or target_tier == cur_tier:
         return {"action": "stay", "reason": "no switch wanted", "zone": None}
     tokens = size.get("tokens")
@@ -77,7 +78,7 @@ def plan(target_tier, cur_tier, size, prev_want=None, starts_new_task=False, bud
     be = breakeven(target_tier)
     z = _f("AUTOSWITCH_ZONE", "0.10")
     zone = "below" if tokens < be * (1 - z) else "above" if tokens > be * (1 + z) else "zone"
-    if zone != "below" and size.get("method") != "precise":
+    if zone != "below" and size.get("method") not in ("precise", "exact"):
         return {"action": "stay", "reason": "near or above break-even, no precise count: staying", "zone": zone}
     if tokens < be:
         return {"action": "inplace", "reason": f"{int(tokens)} real tokens < break-even {int(be)}", "zone": zone}
