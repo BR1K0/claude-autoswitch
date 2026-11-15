@@ -71,6 +71,23 @@ const modelName = (id: string) => {
   return m[3] !== undefined ? `${name} ${m[2]}.${m[3]}` : `${name} ${m[2]}`
 }
 
+// A cheaper model than the app's never carries over between turns: each Haiku turn needs the router's fresh
+// yes. Moving up (or to a newer version of the same tier) carries over, which never lowers quality.
+const TIERS = ['haiku', 'sonnet', 'opus'] as const
+const tierOf = (id: string): number | null => {
+  const m = /(haiku|sonnet|opus)/i.exec(id)
+  return m ? TIERS.indexOf(m[1]!.toLowerCase() as (typeof TIERS)[number]) : null
+}
+// The last turn's model is kept only when it is at least as strong as the app's: a cheaper model needs a fresh
+// yes from the router every turn. Otherwise an unsure or failed router answer would leave a hard message on Haiku
+// just because the turn before was easy.
+const kept = (running: string | null, app: string): string | null => {
+  if (running === null) return null
+  const r = tierOf(running)
+  const a = tierOf(app)
+  return r !== null && a !== null && r >= a ? running : null
+}
+
 const cap = (word: string) => word[0]!.toUpperCase() + word.slice(1)
 
 const markers = (text: string): string[] => [...text.matchAll(IMAGE_MARK)].map(m => m[1]!.trim()).filter(Boolean)
@@ -291,7 +308,7 @@ export const register: Register = on => {
       let reason = 'router inert'
       if (appModel !== e.model) running = null
       appModel = e.model
-      const base = running ?? e.model
+      const base = kept(running, e.model) ?? e.model
       if (await refresh($)) {
         const text = ctx?.prompt ?? ''
         const images = text === '' || text.includes('[Image: source:') ? await findImages($, text) : []
