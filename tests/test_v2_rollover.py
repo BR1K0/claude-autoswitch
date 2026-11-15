@@ -246,10 +246,22 @@ class GuardTest(RBase):
         (j,) = rollover.jobs_of(recs[0]["id"])
         self.assertEqual((j["kind"], j["orig_id"], j["movable"]), ("linked", ID9, True))
 
-    def test_background_command_without_recipe(self):
+    def test_background_command_does_not_block(self):
+        """A dev server left running no longer holds the chat past the cutoff: it stays with part 1, named in
+        part 2's handoff, never listed as a job to recreate."""
+        import rollover
         why, recs = self.blocked(BG)
+        self.assertEqual(len(recs), 1, why)
+        (j,) = rollover.jobs_of(recs[0]["id"])
+        self.assertEqual((j["kind"], j["orig_id"], j["movable"], j["title"]), ("background", "bhl53j9bb", False, "sleep 999"))
+        txt = rollover._jobs_text([j])
+        self.assertIn("still running in part 1", txt); self.assertIn("sleep 999", txt)
+
+    def test_background_command_blocks_when_asked(self):
+        env = {"AUTOSWITCH_ROLLOVER_WAIT_BACKGROUND": "on"}
+        why, recs = self.blocked(BG, env=env)
         self.assertEqual(recs, []); self.assertIn("background command running", why[0])
-        why, recs = self.blocked(BG + BG_DONE)
+        why, recs = self.blocked(BG + BG_DONE, env=env)
         self.assertEqual(len(recs), 1)
 
     def test_background_done_as_queued_attachment(self):

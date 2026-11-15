@@ -17,9 +17,10 @@ Triggers (real tokens from sizes.py, all configurable):
           crossing the threshold within the next turn (chat already over AUTOSWITCH_ROLLOVER_EARLY_FLOOR, 0.6
           of the threshold). AUTOSWITCH_ROLLOVER_EARLY=off disables it.
 Guards (all must hold): a quiet moment (no tool call without a result, no failed Edit/Write left unfixed, no
-linked session mid-task, no background command running: those have no recreate recipe; a failed Edit or a
-background command older than AUTOSWITCH_ROLLOVER_GUARD_EXPIRE, 30 min, no longer blocks, and the reason is
-kept in state.json as guards_expired), not the Watcher's own chat (it owns the heartbeat, or runs a watch.sh
+linked session mid-task; a failed Edit older than AUTOSWITCH_ROLLOVER_GUARD_EXPIRE, 30 min, no longer blocks,
+and the reason is kept in state.json as guards_expired). A running background command (a dev server, a long
+build) does not block: it keeps running, owned by part 1, and part 2's handoff names it and how to restart it.
+AUTOSWITCH_ROLLOVER_WAIT_BACKGROUND=on makes it block again (until it is 30 min old), the old behaviour. not the Watcher's own chat (it owns the heartbeat, or runs a watch.sh
 Monitor: a Watcher is never moved as a job), no rollover of this chat in the last AUTOSWITCH_ROLLOVER_GAP
 (100k) tokens, no open handoff or rollover, and the saving beats the handoff's cost (#40's re-cache figures,
 see worth()).
@@ -358,6 +359,12 @@ def guard_expire():
     return _f("AUTOSWITCH_ROLLOVER_GUARD_EXPIRE", "1800")
 
 
+def wait_background():
+    """Whether a running background command blocks a rollover (AUTOSWITCH_ROLLOVER_WAIT_BACKGROUND, default
+    off: it stays with part 1 and part 2 is told about it, so a dev server never holds a chat past the cutoff)."""
+    return os.environ.get("AUTOSWITCH_ROLLOVER_WAIT_BACKGROUND", "off").strip().lower() == "on"
+
+
 def _is_watcher(inp):
     """A Monitor running the Autoswitch Watcher (watch.sh)."""
     return isinstance(inp, dict) and re.search(r"(^|[/\s'\"])watch\.sh\b", str(inp.get("command") or "")) is not None
@@ -381,7 +388,7 @@ def quiet(s):
         why.append("half-done edit (%s)" % ", ".join(s["half_edits"]))
     if s["busy_linked"]:
         why.append("linked session mid-task (%s)" % ", ".join(s["busy_linked"]))
-    if s["background"]:
+    if s["background"] and wait_background():
         why.append("background command running, no recreate recipe (%s)" % ", ".join(j["orig_id"] for j in s["background"]))
     if s.get("watcher"):
         why.append("this chat runs the Watcher (watch.sh Monitor %s)" % ", ".join(s["watcher"]))
@@ -515,6 +522,10 @@ def create(app_id, cli_id, transcript, cwd, model, prompt, info, record, permiss
         jobs.append({"jid": uuid.uuid4().hex[:12], "kind": j["kind"], "owner": "part1", "state": "part1",
                      "orig_id": j["orig_id"], "recipe": j.get("recipe"), "remove": j.get("remove"),
                      "title": j.get("title"), "movable": bool(j.get("recipe"))})
+    for j in (s or {}).get("background") or []:  # keeps running in part 1; part 2 is told (see _jobs_text)
+        jobs.append({"jid": uuid.uuid4().hex[:12], "kind": "background", "owner": "part1", "state": "part1",
+                     "orig_id": j["orig_id"], "recipe": None, "remove": None, "title": j.get("command"),
+                     "movable": False})
     save(rid, jobs, "jobs")
     rec["steps"] = {"created": rec["ts"]}
     save(rid, rec)
@@ -539,6 +550,12 @@ def _jobs_text(jobs):
         return "none"
     out = []
     for j in jobs:
+        if j["kind"] == "background":
+            out.append("background command %s, still running in part 1 (`%s`): leave it running if it still works "
+                       "for you; to restart it after changes, stop the old process first (its port or pkill: part "
+                       "1's task id does not work here), then start it again with run_in_background"
+                       % (j["orig_id"], j.get("title") or "?"))
+            continue
         what = j.get("title") or (j.get("recipe") or {}).get("args", {}).get("description") or j["orig_id"]
         out.append("%s %s (%s)%s" % (j["kind"], j["orig_id"], what, "" if j["movable"] else ", stays with part 1"))
     return "; ".join(out)
