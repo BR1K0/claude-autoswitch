@@ -369,6 +369,11 @@ def main():
             pins.observe(app_id, cur)  # remembers the model seen; a change nobody here made pins the chat
         new_chat = not info and first_prompt(hook.get("transcript_path"))
         pinned = bool(app_id) and pins.is_pinned(hook.get("session_id"), app_id, cur, hook.get("transcript_path"))
+        if DRY and os.environ.get("AUTOSWITCH_CURRENT_MODEL"):
+            # the inline plugin runs this chat on its own pick, which the app's setting (info["model"]) does not show:
+            # decide from the model the chat really runs on, so a long chat is not moved back to the app's model.
+            # Pins above keep using the app's setting: that is where a hand pick shows.
+            cur = os.environ["AUTOSWITCH_CURRENT_MODEL"]
         handoff_to = None
         if ho:
             import budget

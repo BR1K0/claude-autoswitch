@@ -322,6 +322,13 @@ class PredictiveInlineTest(unittest.TestCase):
                       AUTOSWITCH_CURRENT_MODEL="claude-opus-4-7")
         self.assertEqual(d["target"], "claude-opus-5-5")
 
+    def test_the_model_the_plugin_runs_on_counts_not_the_apps_setting(self):
+        self._on("claude-opus-4-7")                                       # the app still says 4.7 ...
+        d = self._dry("design the storage layer", scorer(self, "opus", 0.99), AUTOSWITCH_UPGRADE_MAX_TOKENS="10",
+                      AUTOSWITCH_CURRENT_MODEL="claude-opus-5-5")
+        self.assertEqual(d["current"], "claude-opus-5-5")                 # ... but the plugin runs it on 5.5: stay
+        self.assertIsNone(d["target"])
+
     # --- the CLI ---
     def _cli(self, *args, **env):
         return subprocess.run([sys.executable, os.path.join(REPO, "bin", "autoswitch"), *args], capture_output=True,
