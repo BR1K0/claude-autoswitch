@@ -46,6 +46,20 @@ def transcript(path, user_msgs=(), filler_chars=0, extra=""):
     return path
 
 
+def usage_reply(n, text="ok"):
+    """An assistant reply whose API usage says the chat is n tokens."""
+    return json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}],
+        "usage": {"input_tokens": 2, "cache_read_input_tokens": n - 1002, "cache_creation_input_tokens": 1000}}}) + "\n"
+
+
+def usage_tr(path, sizes_seen, extra=""):
+    with open(path, "w") as f:
+        for i, n in enumerate(sizes_seen):
+            f.write(entry("user", "message %d" % i) + usage_reply(n))
+        f.write(extra)
+    return path
+
+
 class Scorer:
     """Fake scorer: probs chosen by a function of the text, so the context call can differ from the message's."""
     def __init__(self, test, fn):
@@ -166,6 +180,33 @@ class SizeTest(Base):
         import sizes
         self.assertEqual(sizes.estimate(os.path.join(self.d, "nope.jsonl"))["method"], "unknown")
         self.assertIsNone(sizes.estimate(None)["tokens"])
+
+    def test_exact_counts_messages_as_api_size_minus_the_chats_start(self):
+        import sizes
+        p = usage_tr(os.path.join(self.d, "u.jsonl"), [78000, 100000, 150000])
+        est = sizes.estimate(p)
+        self.assertEqual(est["method"], "exact")
+        self.assertEqual((est["tokens"], est["exact_total"], est["start"]), (72000.0, 150000.0, 78000.0))
+        boundary = json.dumps({"type": "system", "subtype": "compact_boundary"}) + "\n"
+        usage_tr(p, [78000, 250000], extra=boundary + entry("user", "after") + usage_reply(110000))
+        self.assertEqual(sizes.estimate(p)["tokens"], 32000.0)            # the start survives a compaction
+        usage_tr(p, [300000, 310000])                                     # opened with a huge paste: start capped
+        self.assertEqual(sizes.estimate(p)["tokens"], 210000.0)
+        usage_tr(p, [78000])
+        self.assertEqual(sizes.estimate(p)["tokens"], 0.0)                # first reply only
+        os.environ["AUTOSWITCH_EXACT_SIZE"] = "off"
+        self.assertEqual(sizes.estimate(p)["method"], "cheap")
+        del os.environ["AUTOSWITCH_EXACT_SIZE"]
+        self.assertEqual(sizes.estimate(transcript(p, ["no usage"]))["method"], "cheap")  # no usage yet: old path
+
+    def test_hook_uses_the_exact_message_size(self):
+        self.record(model="claude-opus-5-5")
+        sc = Scorer(self, fixed(0.05, 0.9, 0.05))
+        tr = usage_tr(os.path.join(self.d, "u.jsonl"), [78000, 140000, 200000])  # small file, 122k of messages
+        self.hook("tidy up the router threshold docs", sc, tr=tr, mode="shadow")
+        r = self.shadow()[-1]
+        self.assertEqual((r["size_method"], r["size_exact_total"], r["size_start"]), ("exact", 200000, 78000))
+        self.assertEqual(r["zone"], "above"); self.assertIn("one-off", r["reason"])
 
     def test_hook_logs_both_estimates(self):
         self.record()
@@ -360,6 +401,8 @@ class PlanTest(Base):
         self.assertEqual(plan("opus", "haiku", P(90000))["action"], "stay")                          # up, one-off
         self.assertEqual(plan("opus", "haiku", P(90000), "opus")["action"], "inplace")               # up, lasting: in place
         self.assertEqual(plan("sonnet", "opus", P(200000, "cheap"))["action"], "stay")               # above, cheap only
+        self.assertEqual(plan("haiku", "sonnet", P(52000, "exact"))["action"], "inplace")            # exact decides in the zone
+        self.assertEqual(plan("haiku", "sonnet", P(58000, "exact"), prev_want="haiku")["action"], "handoff")
         os.environ["AUTOSWITCH_BREAKEVEN_SONNET"] = "100000"
         self.assertEqual(plan("sonnet", "opus", P(90000))["action"], "inplace")
 

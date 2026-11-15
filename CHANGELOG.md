@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.4
+
+- **Turns never fall back to an older Opus.** A chat made before Opus 5.5 kept Opus 4.7 as its app setting, and turns
+  the router had no word on ran there, re-reading the whole chat into a new cache each flip. Every turn now runs on
+  the newest version of its tier (a pin keeps its tier, on the current version).
+- **Old parts stay quiet.** When a rolled-over chat's next part ends a turn, the app wakes the old part, which
+  re-read its 200k-400k chat just to say "continued in part N". Those turns are now dropped before any model call.
+- **Model switching uses the exact chat size** from the API usage, minus the chat's starting size (tools and system
+  prompt). The old count read 30-35% low, so chats switched in place well past break-even.
+
 ## 0.3.3
 
 - **A cheaper model never carries over between turns.** 0.3.2 kept unscored turns on the previous turn's model; after

@@ -17,6 +17,12 @@ The precise count runs when the file is at least AUTOSWITCH_PRECISE_BYTES (120 K
 the cheap number is only used for the in-place cost check. The 5x overcount does not hold for every chat
 (a chat of long pasted text is close to 1x), so the cheap number never decides near break-even.
 Both numbers are returned so shadow.jsonl can log them side by side.
+
+When the chat has a reply with API usage, estimate() uses it instead (method "exact"): the messages are the
+exact size the API recorded on the last reply minus the chat's starting size (its first reply: the tools and
+system prompt, about 78k, that every chat carries and that a handoff pays too). Step 1's break-evens (55k,
+70k) were measured on message size, and the precise count reads 30-35% low against the API, so a chat used to
+switch in place until it really had 75-100k of messages.
 """
 import json
 import os
@@ -118,12 +124,29 @@ def precise(path):
     return chars / 4.0 * factor() + imgs * _f("AUTOSWITCH_IMAGE_TOKENS", "1500")
 
 
+def exact_messages(path):
+    """(message tokens, total, start) from the API usage, or None if no reply has usage yet. start is the
+    first reply's size (tools, system prompt and the first message), capped at AUTOSWITCH_START_TOKENS_MAX
+    (100k) so a chat that opens with a huge paste still counts most of it as messages."""
+    seen = []
+    total = exact(path, first=seen)
+    if total is None or not seen:
+        return None
+    start = min(seen[0], _f("AUTOSWITCH_START_TOKENS_MAX", "100000"))
+    return max(0.0, float(total) - start), float(total), float(start)
+
+
 def estimate(path, force_precise=False):
-    """{"tokens", "cheap", "precise", "method"}: tokens is the number to decide with (real tokens), None if unknown.
-    method: "cheap" | "precise" | "unknown"."""
+    """{"tokens", "cheap", "precise", "method"}: tokens is the number to decide with (message tokens), None if
+    unknown. method: "exact" | "cheap" | "precise" | "unknown"; "exact" also gives "exact_total" and "start"."""
     c = cheap(path)
     if c is None:
         return {"tokens": None, "cheap": None, "precise": None, "method": "unknown"}
+    if os.environ.get("AUTOSWITCH_EXACT_SIZE", "on").strip().lower() != "off":
+        e = exact_messages(path)
+        if e is not None:
+            return {"tokens": e[0], "cheap": c, "precise": None, "method": "exact", "exact_total": e[1],
+                    "start": e[2]}
     p = None
     try:
         big = os.path.getsize(path) >= _f("AUTOSWITCH_PRECISE_BYTES", "120000")
@@ -136,11 +159,12 @@ def estimate(path, force_precise=False):
     return {"tokens": c, "cheap": c, "precise": None, "method": "cheap"}
 
 
-def exact(path, marks=None):
+def exact(path, marks=None, first=None):
     """The chat's real context size in tokens, from the API usage the app records on every reply (input +
     cache read + cache write: what the model actually re-reads, tools and system prompt included, and what the
     app's context meter shows). None if no reply has usage yet. marks: if a list, gets the size at the start of
-    each typed user message (the last reply's size before it); cleared at a compaction."""
+    each typed user message (the last reply's size before it); cleared at a compaction. first: if a list, gets
+    the first reply's size (the chat's starting size; not reset by a compaction)."""
     last = None
     try:
         with open(path, "rb") as f:
@@ -168,6 +192,8 @@ def exact(path, marks=None):
                                 ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
                         if n > 0:
                             last = n
+                            if first is not None and not first:
+                                first.append(n)
                 elif d.get("type") == "user" and marks is not None and last is not None and _typed(msg.get("content")):
                     marks.append(last)
     except (OSError, TypeError, ValueError):

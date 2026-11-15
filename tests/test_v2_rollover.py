@@ -482,6 +482,35 @@ class SequenceTest(RBase):
         self.assertEqual(len(self.recs()), 1)
         self.assertEqual(self.stop(self.big()), {})
 
+    def test_old_part_not_woken_by_its_next_part(self):
+        """The app wakes part 1 each time part 2 ends a turn; that turn is dropped before any model call."""
+        import rollover
+        rec, _ = self.rolled()
+        self.cli("build", rec["id"]); self.cli("started", rec["id"], ID2)
+        self.deliver(rec)
+        self.as_part1()
+        self.assertEqual(self.cli("linked", rec["id"]), {"ok": True})
+        self.assertEqual(rollover.load(rec["id"])["part2_session"], ID2)
+
+        def event(*ids):
+            notes = "".join('<system-reminder>\nThe session "part 2" you started (%s) finished a turn. It reported: '
+                            '"done"\n</system-reminder>\n' % i for i in ids)
+            return notes + "\n<side-sessions-event>None of the sessions you started is working now.</side-sessions-event>"
+
+        out = self.hook(event(ID2), self.sc(), tr=self.big())
+        self.assertIs(out.get("continue"), False)
+        self.assertIn("stays idle", out["stopReason"])
+        other = "local_00000000-0000-4000-8000-0000000000ff"
+        for prompt in (event(other), event(ID2, other)):  # another session's news still reaches part 1
+            out = self.hook(prompt, self.sc(), tr=self.big())
+            self.assertNotIn("continue", out)
+            self.assertIn("continued in part 2", out["hookSpecificOutput"]["additionalContext"])
+        out = self.hook("<task-notification> <task-id>x</task-id> Monitor event", self.sc(), tr=self.big())
+        self.assertNotIn("continue", out)  # its own jobs' events too
+        self.as_part2()  # part 2 itself is never silenced by this
+        out = self.hook(event(ID2), self.sc(), tr=self.big(name="c2.jsonl"), cli="c2")
+        self.assertNotIn("continue", out)
+
     def test_no_jobs_confirms_at_delivery(self):
         import rollover
         rec, _ = self.rolled()
@@ -704,7 +733,7 @@ class RollbackTest(RBase):
                     data = raw
                 for x in data if isinstance(data, list) else [data]:
                     if isinstance(x, dict):
-                        for k in ("ts", "id", "handoff_path"):
+                        for k in ("ts", "id", "handoff_path", "size_exact_total", "size_start"):  # log-only size details
                             x.pop(k, None)
                 key = rel.split(os.sep)[0] + "/" + ("*" if rel.startswith(("pending", "pass", "handoff")) else f)
                 state.setdefault(key, []).append(data)
