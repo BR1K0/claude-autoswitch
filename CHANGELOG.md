@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.5
+
+- **A dev server no longer holds a chat past the rollover point.** A running background command used to block the
+  rollover until it was 30 minutes old, and each restart reset the clock. Now the chat rolls over anyway: the
+  command keeps running, owned by the old part, and the new part's handoff names it and how to restart it.
+  `AUTOSWITCH_ROLLOVER_WAIT_BACKGROUND=on` restores the wait.
+
 ## 0.3.4
 
 - **Turns never fall back to an older Opus.** A chat made before Opus 5.5 kept Opus 4.7 as its app setting, and turns
