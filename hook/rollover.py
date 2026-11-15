@@ -112,6 +112,10 @@ def measure(transcript):
     """{"tokens", "method", "marks": [tokens at the start of each typed user message]}. A file that can't hold
     AUTOSWITCH_ROLLOVER_EARLY_FLOOR x threshold real tokens even at one character per byte is not counted."""
     import sizes
+    marks = []
+    t = sizes.exact(transcript, marks)
+    if t is not None:  # the API's own count: what the app's context meter shows
+        return {"tokens": float(t), "method": "exact", "marks": [float(x) for x in marks]}
     try:
         size = os.path.getsize(transcript)
     except (OSError, TypeError, ValueError):
@@ -140,9 +144,9 @@ def growth(m):
 def trigger(m, deferred=False):
     """'size' | 'early' | 'deferred' | None."""
     t = m.get("tokens")
-    if t is not None and m.get("method") == "precise" and t >= threshold():
+    if t is not None and m.get("method") in ("precise", "exact") and t >= threshold():
         return "size"
-    if t is not None and m.get("method") == "precise" and \
+    if t is not None and m.get("method") in ("precise", "exact") and \
             os.environ.get("AUTOSWITCH_ROLLOVER_EARLY", "on").strip().lower() != "off" and \
             t >= threshold() * _f("AUTOSWITCH_ROLLOVER_EARLY_FLOOR", "0.6"):
         g = growth(m)
@@ -153,11 +157,12 @@ def trigger(m, deferred=False):
     return None
 
 
-def worth(cur, tgt, tokens):
+def worth(cur, tgt, tokens, exact=False):
     """(ok, why). #40's cost figures (policy.cfg: re-cache per 50k on each model, cached reads = READ_FRACTION
     of a write). Cost: part 2 caches the handoff (AUTOSWITCH_ROLLOVER_HANDOFF_TOKENS, 25k) on its model, and
     the rollover turn re-reads part 1 about AUTOSWITCH_ROLLOVER_STEPS (8) times. Saving: each of the next
-    AUTOSWITCH_ROLLOVER_EXPECTED_REQUESTS (30) requests re-reads the handoff instead of the whole chat."""
+    AUTOSWITCH_ROLLOVER_EXPECTED_REQUESTS (30) requests re-reads the handoff and the fixed tools and prompt
+    (AUTOSWITCH_ROLLOVER_BASE_TOKENS, 55k, so a new part starts near the 80k measured) instead of the whole chat."""
     c = cfg()
     cur, tgt = cur or "sonnet", tgt or cur or "sonnet"
     if tokens is None or cur not in c["recache50k"] or tgt not in c["recache50k"]:
@@ -166,7 +171,10 @@ def worth(cur, tgt, tokens):
     r = lambda t: w(t) * c["read_fraction"]     # noqa: E731  cached-read $ per token
     h = _f("AUTOSWITCH_ROLLOVER_HANDOFF_TOKENS", "25000")
     cost = h * w(tgt) + _f("AUTOSWITCH_ROLLOVER_STEPS", "8") * tokens * r(cur)
-    saving = _f("AUTOSWITCH_ROLLOVER_EXPECTED_REQUESTS", "30") * (tokens * r(cur) - h * r(tgt))
+    # the new part re-reads the handoff plus the fixed tools and system prompt every chat carries (~78k measured;
+    # tokens are the API's exact count, which includes them)
+    start = h + (_f("AUTOSWITCH_ROLLOVER_BASE_TOKENS", "55000") if exact else 0)
+    saving = _f("AUTOSWITCH_ROLLOVER_EXPECTED_REQUESTS", "30") * (tokens * r(cur) - start * r(tgt))
     if saving <= cost:
         return False, f"saving ${saving:.3f} <= cost ${cost:.3f}"
     return True, f"saving ${saving:.3f} > cost ${cost:.3f}"
@@ -208,15 +216,22 @@ def scan(transcript, now=None):
         return None
     with f:
         for line in f:
-            if b'"user"' not in line and b'"assistant"' not in line:
+            if b'"user"' not in line and b'"assistant"' not in line and b'task-notification' not in line \
+                    and b'side-sessions-event' not in line:
                 continue
             try:
                 d = json.loads(line)
             except ValueError:
                 continue
-            if not isinstance(d, dict) or d.get("type") not in ("user", "assistant") or d.get("isSidechain"):
+            if not isinstance(d, dict) or d.get("isSidechain"):
                 continue
             ts = _ts(d) or now
+            queued = _queued_note(d)
+            if queued is not None:  # the app queues machine notes as attachment / queue-operation lines
+                _machine_note(queued, ts, jobs, last_reply)
+                continue
+            if d.get("type") not in ("user", "assistant"):
+                continue
             c = (d.get("message") or {}).get("content") if isinstance(d.get("message"), dict) else None
             if d["type"] == "assistant":
                 for b in c or []:
@@ -230,12 +245,7 @@ def scan(transcript, now=None):
                     assistant = txt
                 continue
             text = _text_of(c)
-            for sid in re.findall(r"local_[0-9a-f-]{36}", text):
-                if text.lstrip().startswith("<"):
-                    last_reply[sid] = ts  # a machine note about that session: it reported back
-            m = re.search(r"<task-id>([^<]+)</task-id>", text)
-            if m and re.search(r"<status>(completed|failed|killed|stopped)</status>", text):
-                jobs.pop(m.group(1).strip(), None)
+            _machine_note(text, ts, jobs, last_reply)
             if isinstance(c, list) and not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c) \
                     or isinstance(c, str):
                 if not text.lstrip().startswith("<"):
@@ -316,6 +326,30 @@ def scan(transcript, now=None):
             "background": [j for j in live if j["kind"] == "background"], "busy_linked": busy,
             "watcher": [j["orig_id"] for j in live if j["kind"] == "watcher"], "expired": expired,
             "task": {"user": [u[:1500] for u in user_msgs[-3:]], "assistant": assistant[-1500:]}}
+
+
+def _queued_note(d):
+    """The text of a machine note the app queued (an `attachment` line of type queued_command, or a
+    `queue-operation` enqueue), else None. Newer app builds record task notifications only this way."""
+    a = d.get("attachment")
+    if d.get("type") == "attachment" and isinstance(a, dict) and a.get("type") == "queued_command":
+        p = a.get("prompt")
+        return p if isinstance(p, str) else _text_of(p)
+    if d.get("type") == "queue-operation" and d.get("operation") == "enqueue" and isinstance(d.get("content"), str):
+        return d["content"]
+    return None
+
+
+def _machine_note(text, ts, jobs, last_reply):
+    """A note about a linked session marks it as reported back; a finished task notification ends its job."""
+    if not text:
+        return
+    if text.lstrip().startswith("<"):
+        for sid in re.findall(r"local_[0-9a-f-]{36}", text):
+            last_reply[sid] = ts
+    m = re.search(r"<task-id>([^<]+)</task-id>", text)
+    if m and re.search(r"<status>(completed|failed|killed|stopped)</status>", text):
+        jobs.pop(m.group(1).strip(), None)
 
 
 def guard_expire():
@@ -442,7 +476,7 @@ def guards(app_id, m, s, cur, tgt):
     lt = last_tokens(app_id)
     if lt is not None and m.get("tokens") is not None and m["tokens"] - lt < gap():
         why.append("rollover %dk tokens ago (< %dk)" % ((m["tokens"] - lt) // 1000, gap() // 1000))
-    w_ok, w_why = worth(cur, tgt, m.get("tokens"))
+    w_ok, w_why = worth(cur, tgt, m.get("tokens"), exact=m.get("method") == "exact")
     if not w_ok:
         why.append(w_why)
     return not why, why
