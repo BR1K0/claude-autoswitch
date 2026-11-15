@@ -248,6 +248,16 @@ def part2_prompt(rec):
             f"the user's message:\n{rec['prompt']}")
 
 
+def group_step(rec):
+    """Every part of a chat goes in the first chat's sidebar group, so a detached part is still easy to find.
+    This chat's group is that group (each earlier part was filed there); with none, a group named after the chat."""
+    base = rec["base_title"]
+    return (f"get_session \"self\": if this chat is in a custom sidebar group, use that group. Otherwise list_groups "
+            f"and use the group named \"{base}\", or create_group \"{base}\" if there is none, and move_sessions "
+            f"this chat (\"self\") into it too (if that is refused because this chat is nested, leave this chat where "
+            f"it is). Then move_sessions the new session into that group.")
+
+
 def instruction(rec):
     """additionalContext for the current chat. Short and in order; the tool calls are the app's own."""
     bridge = os.path.join(HERE, "acpmh_bridge.py")
@@ -268,7 +278,7 @@ def instruction(rec):
         f"background = the JSON's \"background\" value.\n"
         f"3. detach_session on the new session.\n"
         f"4. set_session_title: this chat (\"self\") to \"{rec['old_title']}\"; the new session to \"{rec['new_title']}\".\n"
-        f"5. list_groups; if a group named \"{rec['project']}\" exists, move_sessions the new session into it.\n"
+        f"5. {group_step(rec)}\n"
         f"6. open_session_in the new session, target \"split\". If it is refused (window hidden), skip it.\n"
         f"7. Reply here with exactly one line: \"Continued in part {rec['part']} ({tgt}): <link to the new session>. "
         f"Not carried over: {missing}.\""

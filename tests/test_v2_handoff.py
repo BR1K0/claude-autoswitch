@@ -576,7 +576,7 @@ class DeliveryTest(Base):
         self.assertEqual(handoff.split_title("Router work · part 2 (Haiku)"), ("Router work", 2))
         ins = handoff.instruction(rec)
         for s in ('initiation "user_asked"', 'model "claude-haiku-5-5"', 'effort "high"', 'permission_mode "acceptEdits"',
-                  "detach_session", "set_session_title", 'group named "proj"', "open_session_in", "Continued in part 2 (Haiku)",
+                  "detach_session", "set_session_title", 'get_session "self"', 'create_group "Router work"', "open_session_in", "Continued in part 2 (Haiku)",
                   "connectors (Claude Docs)", "added folders (/extra)", "output style", "Do NOT answer"):
             self.assertIn(s, ins)
 
