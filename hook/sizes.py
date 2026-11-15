@@ -134,3 +134,42 @@ def estimate(path, force_precise=False):
     if p is not None:
         return {"tokens": p, "cheap": c, "precise": p, "method": "precise"}
     return {"tokens": c, "cheap": c, "precise": None, "method": "cheap"}
+
+
+def exact(path, marks=None):
+    """The chat's real context size in tokens, from the API usage the app records on every reply (input +
+    cache read + cache write: what the model actually re-reads, tools and system prompt included, and what the
+    app's context meter shows). None if no reply has usage yet. marks: if a list, gets the size at the start of
+    each typed user message (the last reply's size before it); cleared at a compaction."""
+    last = None
+    try:
+        with open(path, "rb") as f:
+            for line in f:
+                if b'"compact_boundary"' in line and b'"system"' in line:
+                    try:
+                        if json.loads(line).get("subtype") == "compact_boundary" and marks is not None:
+                            del marks[:]
+                    except ValueError:
+                        pass
+                    continue
+                if b'"usage"' not in line and not (marks is not None and b'"user"' in line):
+                    continue
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(d, dict) or d.get("isSidechain"):
+                    continue
+                msg = d.get("message") if isinstance(d.get("message"), dict) else {}
+                if d.get("type") == "assistant":
+                    u = msg.get("usage")
+                    if isinstance(u, dict):
+                        n = sum(int(u.get(k) or 0) for k in
+                                ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"))
+                        if n > 0:
+                            last = n
+                elif d.get("type") == "user" and marks is not None and last is not None and _typed(msg.get("content")):
+                    marks.append(last)
+    except (OSError, TypeError, ValueError):
+        return None
+    return last

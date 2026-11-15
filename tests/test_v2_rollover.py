@@ -252,6 +252,16 @@ class GuardTest(RBase):
         why, recs = self.blocked(BG + BG_DONE)
         self.assertEqual(len(recs), 1)
 
+    def test_background_done_as_queued_attachment(self):
+        body = "<task-notification>\n<task-id>bhl53j9bb</task-id>\n<status>failed</status>\n</task-notification>"
+        att = json.dumps({"type": "attachment", "timestamp": iso(),
+                          "attachment": {"type": "queued_command", "prompt": body}}) + "\n"
+        why, recs = self.blocked(BG + att)
+        self.assertEqual(len(recs), 1, why)
+        q = json.dumps({"type": "queue-operation", "operation": "enqueue", "timestamp": iso(), "content": body}) + "\n"
+        why, recs = self.blocked(BG + q)
+        self.assertEqual(len(recs), 1, why)
+
     def test_failed_edit_and_lost_background_expire_after_30_min(self):
         old = time.time() - 31 * 60
         bad = tool("Edit", {"file_path": "/x.py"}, "error", err=True, ts=old)
@@ -298,6 +308,26 @@ class GuardTest(RBase):
         import rollover
         self.assertTrue(rollover.worth("sonnet", "sonnet", 200000)[0])
         self.assertFalse(rollover.worth("sonnet", "sonnet", None)[0])
+        self.assertTrue(rollover.worth("opus", "opus", 200000, exact=True)[0])      # fixed tools/prompt counted
+        self.assertFalse(rollover.worth("opus", "opus", 90000, exact=True)[0])      # a new part starts near 80k
+
+    def test_exact_size_from_api_usage(self):
+        import rollover, sizes
+        def reply(n, text="ok"):
+            return json.dumps({"type": "assistant", "timestamp": iso(), "message": {"role": "assistant", "id": "m%d" % n,
+                "content": [{"type": "text", "text": text}],
+                "usage": {"input_tokens": 2, "cache_read_input_tokens": n - 1002, "cache_creation_input_tokens": 1000}}}) + "\n"
+        p = os.path.join(self.d, "u.jsonl")
+        with open(p, "w") as f:
+            f.write(entry("user", "one") + reply(150000) + entry("user", "two") + reply(190000)
+                    + entry("user", "three") + reply(230000))
+        self.assertEqual(sizes.exact(p), 230000)
+        m = rollover.measure(p)
+        self.assertEqual((m["method"], m["tokens"], m["marks"]), ("exact", 230000.0, [150000.0, 190000.0]))
+        self.assertEqual(rollover.trigger(m), "size")
+        with open(p, "w") as f:
+            f.write(entry("user", "one"))
+        self.assertIsNone(sizes.exact(p))                                        # no reply yet: old estimate
         why, recs = self.blocked(env={"AUTOSWITCH_ROLLOVER_EXPECTED_REQUESTS": "2"})
         self.assertEqual(recs, []); self.assertIn("saving $", why[0])
 
