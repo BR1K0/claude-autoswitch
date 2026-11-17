@@ -29,16 +29,16 @@ macOS or Windows (see [Windows](#windows)), the Claude Code **desktop app**, and
 macOS:
 
 ```bash
-git clone https://github.com/BR1K0/claude-autoswitch-v2.git
-cd claude-autoswitch-v2
+git clone https://github.com/BR1K0/claude-autoswitch.git
+cd claude-autoswitch
 ./install.sh
 ```
 
 Windows (PowerShell, no administrator needed):
 
 ```powershell
-git clone https://github.com/BR1K0/claude-autoswitch-v2.git
-cd claude-autoswitch-v2
+git clone https://github.com/BR1K0/claude-autoswitch.git
+cd claude-autoswitch
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
@@ -138,9 +138,9 @@ sample (one prompt = 6 points); labels are coarse; and **the scorer is the weak 
 the design prompts but only about a quarter of the time on the coding tasks. Full tables, both scorers and
 caveats: [docs/mode-tradeoffs.md](docs/mode-tradeoffs.md). Reproduce with `bench/modes.py`.
 
-## v2: long chats, handoffs and rollover (off by default)
+## Long chats: handoffs and rollover (off by default)
 
-v1 leaves long chats alone, because switching model makes the new model re-read the whole history. v2 adds a cheaper
+By default long chats are left alone, because switching model makes the new model re-read the whole history. Handoffs add a cheaper
 way: a **handoff to a new chat** built by [ACPMH](acpmh/), the project memory bundled in this repo. ACPMH keeps a local
 journal of the chat (every message word for word, tool calls, test runs, commits, screenshots with their text read
 locally) and builds a compact handoff the new model reads instead of the full history. Part 2 can still look anything
@@ -148,14 +148,14 @@ up in the journal.
 
 | Chat size | balanced (default) | save | quality |
 |---|---|---|---|
-| under ~70k tokens | switch in place (v1) | switch in place | switch in place |
+| under ~70k tokens | switch in place | switch in place | switch in place |
 | 70k-300k | new chat with the v4 handoff | v4 handoff | switch in place |
 | over 300k | v5b handoff | v5 handoff | v4 handoff |
 
 In the benchmark ([docs/BENCHMARK.md](docs/BENCHMARK.md)) a handoff scored 94-99% of re-reading while using 50-80% less; compaction never won. A handoff only happens for a **lasting** switch (a new task, or two messages in a
 row wanting the other model); a one-off message in a long chat stays put.
 
-Also in v2:
+Also turned on with handoffs:
 - **Real sizes:** the history is counted from the transcript (characters / 4 x 1.6), not file bytes.
 - **Budget modes:** `quality`, `balanced`, `save` (`AUTOSWITCH_BUDGET` or `~/.autoswitch/budget`), with an optional
   limit (`AUTOSWITCH_LIMIT`, e.g. `$20/week`) that nudges the mode when you spend fast.
@@ -176,7 +176,7 @@ echo on > ~/.autoswitch/handoff      # handoffs, budget modes, context scoring
 echo on > ~/.autoswitch/rollover     # rollover too (needs handoff on)
 ```
 
-Turn off with `rm ~/.autoswitch/handoff ~/.autoswitch/rollover`: with both off, every decision is exactly v1's (tested).
+Turn off with `rm ~/.autoswitch/handoff ~/.autoswitch/rollover`: with both off, every decision is exactly what it is with handoffs off (tested).
 Handoffs never use an API key: Autoswitch never runs ACPMH's API-billed fact extraction, and removes
 `ANTHROPIC_API_KEY` from ACPMH's processes. The handoff uses the word-for-word journal. To run fact extraction
 yourself, on purpose, set `ACPMH_SYNC_API=on` and run `python3 -m acpmh.cli sync`.
@@ -219,7 +219,7 @@ On each main-loop turn the plugin runs the installed hook in dry mode (`~/.autos
 
 Tried live on one Mac (a desktop chat on Opus had its request answered by Haiku, with no stop); the packaging in this repo is covered by the plugin's own tests (`claude plugin test plugin/autoswitch-inline`, with Windows cases) and the Python tests, which CI runs on macOS, Linux and Windows. **Not yet tried live on Windows** in the desktop app.
 
-**The band.** Above the prompt box the plugin shows what happened on the last turn ("↪ Haiku 5.5 answered", or "↪ Opus 5.5 (kept)" when the model was left alone) and the budget mode, with **Save / Balanced / Quality** buttons. A click writes `~/.autoswitch/budget`. The budget mode sets the confidence gates (save: switch down readily; quality: switch down rarely, up readily) when [v2](#v2-long-chats-handoffs-and-rollover-off-by-default) is on; with v2 off, the v1 gates apply whatever the band says.
+**The band.** Above the prompt box the plugin shows what happened on the last turn ("↪ Haiku 5.5 answered", or "↪ Opus 5.5 (kept)" when the model was left alone) and the budget mode, with **Save / Balanced / Quality** buttons. A click writes `~/.autoswitch/budget`. The budget mode sets the confidence gates (save: switch down readily; quality: switch down rarely, up readily) when [handoffs](#long-chats-handoffs-and-rollover-off-by-default) are on; with handoffs off, the default gates apply whatever the band says.
 
 **Chats opened before the plugin** don't have it. The plugin marks every chat it runs in (`~/.autoswitch/inline/<chat id>`); a chat without the mark is handled as `predictive` (on Windows: `instant`) until you open a new one. That fallback needs a Watcher.
 
@@ -361,7 +361,7 @@ What is different from the Mac version:
 - The `autoswitch` command is `%USERPROFILE%\.autoswitch\bin\autoswitch.cmd`, added to your user PATH. Open a new terminal after installing.
 - The Watcher prompt (`autoswitch watcher`) runs the Python the installer picked (`py -3.12`, `-3.11`, `-3.10`, `-3.13` or `-3.9` first, since scikit-learn 1.5.2 has wheels only for 3.9 to 3.13; `py -3` / `python` only as a last resort, with a warning) instead of `python3`, and `hook/watch.py` instead of `watch.sh`.
 - `predictive` is not available (`autoswitch speed predictive` says so and keeps your speed). Chats opened before the inline plugin was installed fall back to `instant`.
-- v2 handoff and rollover (off by default) use POSIX file locks and stay off on Windows.
+- Handoff and rollover (off by default) use POSIX file locks and stay off on Windows.
 - Screenshots are detected through the Windows clipboard and never held, but their text is not read (no OCR yet); such prompts are scored on the typed text only.
 - **Unverified:** the Claude desktop app's session records (`claude-code-sessions`) are looked up in `%APPDATA%\Claude`, and in a Microsoft Store install under `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`. This is inferred from how the app lays out its data folder on the Mac, not from documentation. If both folders exist, the first one that actually contains `claude-code-sessions` is used. If `autoswitch on` never switches, check that this folder exists, or point the hook at the right place with `AUTOSWITCH_SESSIONS`.
 - **Override:** set the user environment variable `AUTOSWITCH_SESSIONS` to the full path of the `claude-code-sessions` folder (e.g. `setx AUTOSWITCH_SESSIONS "%LOCALAPPDATA%\Packages\Claude_xxxx\LocalCache\Roaming\Claude\claude-code-sessions"`, then restart Claude) to skip the detection entirely. It is also unverified that the app runs hook commands from `settings.json` through a shell that accepts the quoted-path form we write.
@@ -387,9 +387,9 @@ plugin/autoswitch-inline/   the Claude Code plugin behind the `inline` speed (te
 .claude-plugin/             the plugin marketplace (`claude plugin marketplace add <this folder>`)
 hook/                       UserPromptSubmit + PostModelSwitch hooks, policy, queue, Watcher helpers
                             (typeahead.py / typeahead.swift: the `predictive` speed's reader)
-                            (v2: handoff.py, rollover.py, budget.py, ctxblend.py, sizes.py, acpmh_bridge.py, stop.py)
-acpmh/                      ACPMH: the chat journal and handoff builder v2 uses (also usable on its own)
-docs/BENCHMARK.md           how the v2 defaults were measured
+                            (handoffs: handoff.py, rollover.py, budget.py, ctxblend.py, sizes.py, acpmh_bridge.py, stop.py)
+acpmh/                      ACPMH: the chat journal and handoff builder the handoffs use (also usable on its own)
+docs/BENCHMARK.md           how the handoff defaults were measured
 docs/mode-tradeoffs.md      what each budget mode saves and risks (bench/modes.py reproduces it)
 scorer/scorer.py            the local scoring service
 train/train.py, data/       training script and the public data it uses
