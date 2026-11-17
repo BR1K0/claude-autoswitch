@@ -7,6 +7,8 @@
   run it, and the key is removed from ACPMH's processes. `acpmh.cli sync` itself now refuses unless
   `ACPMH_SYNC_API=on`.
 - **Keys are redacted from everything ACPMH stores**, not only screenshot text: every event and tool output.
+- **Docs:** the repo is now `claude-autoswitch` (was `claude-autoswitch-v2`); the README drops the v1/v2 names,
+  says "credit savings" in the title, and compares handoffs with compaction at 266k, 500k and 1M.
 
 ## 0.3.6
 
