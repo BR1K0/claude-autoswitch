@@ -18,6 +18,16 @@ A tiny local classifier reads every prompt you send. If a different model would 
 
 > Measured on 150 real SWE-bench bugs: starting on Haiku and escalating only when needed used **about 57% less** per issue than an Opus attempt ([numbers and caveats](#what-it-saves)).
 
+**Long chats: Autoswitch handoffs vs Claude Code's compaction.** When a long chat moves to a new chat, the new model reads a handoff instead of the whole history. Compared with compacting (Sonnet 5.5 taking over, 50 questions about the earlier chat, [details](docs/BENCHMARK.md)):
+
+| Chat size | Remembers: handoff / compaction | Usage per switch: handoff / compaction | Less usage than compacting |
+|---|---|---|---|
+| 266k (measured) | **94%** / 79% | 19¢ / 62¢ | **69%** |
+| 500k (estimate) | **~94%** / ~70% | ~25¢ / ~$1.07 | **~77%** |
+| 1M (remembering measured, compaction cost estimated) | **94%** / 69% | 35¢ / ~$1.93 | **~82%** |
+
+*"Remembers" = how many questions were answered as well as by a model that re-read the whole chat. At 1M a handoff remembered most of the decisions and early instructions that compaction lost (decisions 9/10 vs 4.5/10, early instructions 6.5/7 vs 2/7). The 500k row is interpolated between the measured 266k and 1M points, not measured. Handoffs are off by default: [turn them on](#long-chats-handoffs-and-rollover-off-by-default).*
+
 > **What "usage" means here.** Token usage weighted by each model's API list price, so a token of Opus counts for more than a token of Haiku, and a cached re-read counts for far less than fresh input. On a Pro or Max plan your bill stays the same; what you get is more work before you hit your 5-hour and weekly limits. Anthropic doesn't publish exactly how those limits are counted, but bigger models and longer chats use them up faster too, so read these percentages as estimates of how much further your limits go, not money back. On API keys they are money.
 
 > **Works only in the Code tab of the Claude desktop app** (a Local session on your own computer). It does not work in normal Chat, Cowork, claude.ai in a browser, or Cloud sessions: those have no hooks and no access to your files. No **Code** tab in your app? Update the app first; if it is still missing, Auto Switch can't run on your account.
