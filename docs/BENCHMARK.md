@@ -1,6 +1,6 @@
 # Handoff benchmark
 
-How the v2 defaults were chosen. Every number below was measured on real Claude Code sessions (not
+How the handoff defaults were chosen. Every number below was measured on real Claude Code sessions (not
 published: they are private chats), at list prices.
 
 ## Method
@@ -37,7 +37,7 @@ published: they are private chats), at list prices.
 - v5 drops tool activity, so on agent-driven coding chats it misses the reasons behind code decisions (75-80%).
   v4 holds at 94-95% on every chat.
 - Break-even (a handoff costs less than re-reading): about 70k tokens with Sonnet or Opus taking over, 55k with
-  Haiku. Below it, v2 switches in place.
+  Haiku. Below it, Autoswitch switches in place.
 
 ## Defaults this sets
 
