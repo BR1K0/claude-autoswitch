@@ -5,8 +5,10 @@
 ACPMH is run from AUTOSWITCH_ACPMH (default: the acpmh/ package bundled in this repo) as a separate process, so a new ACPMH version needs
 no router change:
   1. python3 -m acpmh.cli ingest --store <log> <transcript>      the word-for-word journal (free)
-  2. python3 -m acpmh.cli sync --store <log>                     Haiku facts, only if ANTHROPIC_API_KEY is set
-  3. the handoff, with the version that won Step 1 for this chat size and budget mode (docs/BENCHMARK.md,
+  (no `acpmh.cli sync`: it calls the Claude API and would bill an API key. A key being set in the shell is not
+   consent, so handoffs never run it, and ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN are removed from every ACPMH
+   process.)
+  2. the handoff, with the version that won Step 1 for this chat size and budget mode (docs/BENCHMARK.md,
      exactly the options measured there): v4 = full_log, tail 8000; v5 = user_log, tail 8000;
      v5b = user_log, tail 20000 (both v5s capped at 40000 estimated tokens, about 65k real). Balanced: v4
      under 300k real tokens, v5b above. Quality: v4. Save: v4 under 300k, v5 above
@@ -18,7 +20,7 @@ timeout); the handoff wait (handoff.deadline) covers that limit, and a request t
 never overwritten with `built`.
 The project log is ~/.acpmh/<project slug> (AUTOSWITCH_ACPMH_HOME), the slug being the name of the
 transcript's project folder (~/.claude/projects/<slug>/<chat>.jsonl). Any error: no handoff (None), never an
-exception. A failed sync is not an error: the handoff then has the journal and verbatim log only.
+exception.
 """
 import json
 import os
@@ -74,7 +76,12 @@ def _run(args, timeout, end=None):
         if timeout <= 0:
             raise subprocess.TimeoutExpired(args, 0)
     return subprocess.run([sys.executable] + args, cwd=acpmh_dir(), capture_output=True, text=True,
-                          timeout=timeout, stdin=subprocess.DEVNULL)
+                          timeout=timeout, stdin=subprocess.DEVNULL, env=no_key_env())
+
+
+def no_key_env():
+    """The environment for ACPMH steps, without any Anthropic API key: a handoff never bills one."""
+    return {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}
 
 
 def build_max():
@@ -83,7 +90,7 @@ def build_max():
 
 
 def build_handoff(transcript, cwd, out=None, budget_mode="balanced", tokens=None, log=None):
-    """Ingest the chat, sync if a key is set, build the handoff and write it to `out`. Returns the path or None."""
+    """Ingest the chat (no API calls), build the handoff and write it to `out`. Returns the path or None."""
     steps = log if log is not None else []
     end = time.time() + build_max()  # all steps together stay under the handoff wait (handoff.deadline)
     try:
@@ -96,11 +103,6 @@ def build_handoff(transcript, cwd, out=None, budget_mode="balanced", tokens=None
         steps.append("ingest %d" % r.returncode)
         if r.returncode != 0:
             return None
-        if os.environ.get("ANTHROPIC_API_KEY"):
-            r = _run(["-m", "acpmh.cli", "sync", "--store", store], 900, end)
-            steps.append("sync %d" % r.returncode)  # a failed sync still leaves the verbatim journal
-        else:
-            steps.append("sync skipped: no ANTHROPIC_API_KEY")
         r = _run(["-c", _BUILD, store, json.dumps(options(budget_mode, tokens))], 300, end)
         steps.append("handoff %d" % r.returncode)
         if r.returncode != 0 or not r.stdout.strip():

@@ -177,12 +177,13 @@ echo on > ~/.autoswitch/rollover     # rollover too (needs handoff on)
 ```
 
 Turn off with `rm ~/.autoswitch/handoff ~/.autoswitch/rollover`: with both off, every decision is exactly v1's (tested).
-ACPMH fact extraction uses Haiku and runs only if `ANTHROPIC_API_KEY` is set and the `anthropic` package is installed;
-without it the handoff has the word-for-word journal only.
+Handoffs never use an API key: Autoswitch never runs ACPMH's API-billed fact extraction, and removes
+`ANTHROPIC_API_KEY` from ACPMH's processes. The handoff uses the word-for-word journal. To run fact extraction
+yourself, on purpose, set `ACPMH_SYNC_API=on` and run `python3 -m acpmh.cli sync`.
 
-**Privacy:** the journal under `~/.acpmh/` keeps your chats word for word, locally. Secrets are removed only from
-screenshot text, so anything typed into a chat (passwords included) is stored as typed. Never paste passwords or keys
-into a chat, and keep `~/.acpmh/` private.
+**Privacy:** the journal under `~/.acpmh/` keeps your chats word for word, locally. API keys, tokens and labelled
+passwords (`password: ...`) are removed from everything it stores, but a password typed with no label can't be
+recognised. Never paste passwords or keys into a chat, and keep `~/.acpmh/` private.
 
 **Not verified live yet:** a real handoff and rollover in the app (the 300 tests use fakes), and whether a turn continued
 by the Stop hook may start a new chat.

@@ -521,13 +521,17 @@ class BridgeTest(Base):
         self.assertEqual(self.calls()[0], ["ingest", "--store", os.path.join(self.d, "acpmh_home", "-Users-kem-proj"), self.tr])
         self.assertEqual(self.calls()[1][1], {"full_log": True, "tail_tokens": 8000})  # balanced, size unknown: v4
 
-    def test_with_api_key_syncs(self):
+    def test_api_key_is_never_used(self):
         import acpmh_bridge as br
         os.environ["ANTHROPIC_API_KEY"] = "test-not-a-real-key"
-        self.assertTrue(br.build_handoff(self.tr, "/x"))
-        self.assertEqual([c[0] for c in self.calls()], ["ingest", "sync", "build"])
-        os.environ["FAKE_ACPMH_FAIL"] = "sync"                          # a failed sync still builds
-        self.assertTrue(br.build_handoff(self.tr, "/x"))
+        os.environ["ANTHROPIC_AUTH_TOKEN"] = "test-not-a-real-token"
+        try:
+            self.assertTrue(br.build_handoff(self.tr, "/x"))
+            self.assertEqual([c[0] for c in self.calls()], ["ingest", "build"])   # never sync
+            env = br.no_key_env()
+            self.assertNotIn("ANTHROPIC_API_KEY", env); self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
+        finally:
+            os.environ.pop("ANTHROPIC_API_KEY", None); os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 
     def test_version_follows_mode_and_size(self):
         import acpmh_bridge as br

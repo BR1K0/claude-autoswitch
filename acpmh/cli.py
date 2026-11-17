@@ -12,6 +12,8 @@
 """
 import argparse
 import json
+import os
+import sys
 
 from . import extract, handoff, ingest, tools, verify
 from .store import Store
@@ -36,6 +38,9 @@ def main():
     if a.cmd == "ingest":
         print("+%d events" % ingest.ingest(store, ingest.load(a.arg)))
     elif a.cmd == "sync":
+        if os.environ.get("ACPMH_SYNC_API") != "on":
+            sys.exit("sync calls the Claude API and bills an API key, so it is off. "
+                     "Set ACPMH_SYNC_API=on to run it on purpose.")
         import anthropic
         extract.run(store, anthropic.Anthropic(), model=a.model)
         print(json.dumps(verify.run(store)))

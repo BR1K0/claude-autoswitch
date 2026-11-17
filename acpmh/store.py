@@ -10,6 +10,8 @@ import os
 import sqlite3
 import time
 
+from .redact import redact
+
 SCHEMA_VERSION = 1
 
 # Knowledge states for facts. Never collapse these into one confidence score.
@@ -132,6 +134,9 @@ class Store:
                             (source_key,)).fetchone()
         if r:
             return r[0], False
+        # Keys, tokens and passwords never reach the journal or its blobs, from any source.
+        summary = redact(summary)[0] if summary else summary
+        body = redact(body)[0] if body else body
         body_ref = self.put_blob(body) if body else None
         tokens = est_tokens(summary) + (est_tokens(body) if body else 0)
         try:

@@ -468,5 +468,32 @@ class V5Tests(Base):
         self.assertIn("Older instructions no fact captures", text)
 
 
+
+class StoreRedactsTest(unittest.TestCase):
+    def test_keys_never_stored(self):
+        from acpmh.store import Store
+        d = tempfile.mkdtemp()
+        st = Store(d)
+        fake = "sk-ant-api03-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+        st.append("k1", "command", "observed", "export ANTHROPIC_API_KEY=" + fake, body="out " + fake)
+        blobs = os.listdir(os.path.join(d, "blobs"))
+        everything = "".join(open(os.path.join(d, "blobs", b)).read() for b in blobs)
+        everything += json.dumps([tuple(r) for r in st.db.execute("SELECT * FROM events")])
+        self.assertNotIn(fake, everything)
+        self.assertIn("REDACTED", everything)
+        self.assertEqual(st.verify_chain(), [])
+
+
+class SyncOffTest(unittest.TestCase):
+    def test_sync_refuses_without_opt_in(self):
+        d = tempfile.mkdtemp()
+        env = {k: v for k, v in os.environ.items() if k != "ACPMH_SYNC_API"}
+        env["ANTHROPIC_API_KEY"] = "test-not-a-real-key"
+        r = subprocess.run([sys.executable, "-m", "acpmh.cli", "sync", "--store", d],
+                           cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("off", r.stderr)
+
 if __name__ == "__main__":
     unittest.main()
