@@ -28,12 +28,17 @@ published: they are private chats), at list prices.
 | 260k (agent coding) | 100%, 55c | 68%, 60c | 94%, 28c | 80%, 16c | 87%, 24c |
 | 260k, 50 new questions | 100%, 55c | - | 94%, 22c | 75%, 12c | 82%, 19c |
 | 266k | 100%, 56c | 79%, 62c | 94%, 27c | 91%, 14c | 94%, 19c |
-| ~1M | 100%, $1.88 | not run | 95%, 99c | 86%, 26c | 94%, 35c |
+| ~1M | 100%, $1.88 | 69%, ~$1.93 (cost estimated) | 95%, 99c | 86%, 26c | 94%, 35c |
 
 **Haiku 5.5 taking over** scores close to Sonnet on the same handoffs at about a tenth of the cost (266k: re-read
 97% for 16c, v4 94% for 2.4c). **Opus 5.5 taking over** at 266k: re-read 50/50 for $1.18, v4 97% for 58c.
 
 - Compaction never wins: it scores lower and costs as much as re-reading or more.
+- The ~1M compaction arm was added later and run on the subscription (Opus 5.5 compacts the 923k history, Sonnet
+  answers from the ~3k-token summary). Its score is measured; its cost is estimated as re-reading plus the summary,
+  because compaction has to read the whole history once. By category, compaction vs v4: current state 11.5/13 vs
+  13/13, user's messages 8/10 vs 9.5/10, decisions 4.5/10 vs 9/10, details 8.5/10 vs 9.5/10, early instructions
+  2/7 vs 6.5/7.
 - v5 drops tool activity, so on agent-driven coding chats it misses the reasons behind code decisions (75-80%).
   v4 holds at 94-95% on every chat.
 - Break-even (a handoff costs less than re-reading): about 70k tokens with Sonnet or Opus taking over, 55k with
