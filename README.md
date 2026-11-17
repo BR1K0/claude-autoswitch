@@ -1,4 +1,4 @@
-# Claude Auto Switch (Mac and Windows)
+# Claude Auto Switch: credit savings for Claude Code (Mac and Windows)
 
 **Claude Code desktop picks the lightest model that can handle each prompt (Haiku for the quick stuff, Opus only when it matters), so the same work uses less of your plan's usage and your limits last longer.**
 
