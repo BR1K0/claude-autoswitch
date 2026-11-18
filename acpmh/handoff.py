@@ -88,6 +88,10 @@ Facts are compressed and can be stale or miss specifics. Before you rely on a de
 (exact values, counts, what exists, why something was decided, earlier attempts),
 confirm it in the journal with search_history / get_event / list_events. Prefer the
 verbatim recent history and the original events over a fact when they disagree.
+The handoff does not contain everything; the journal does. Whenever you need a detail
+the handoff does not state word for word (an earlier instruction, a decision and its
+reason, an exact name, value, path or file content, what is left to do), search the
+journal first. Never answer "unknown" or guess until you have searched for it.
 """)
 
     S.append("## Current task and next step")

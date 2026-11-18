@@ -18,15 +18,15 @@ A tiny local classifier reads every prompt you send. If a different model would 
 
 > Measured on 150 real SWE-bench bugs: starting on Haiku and escalating only when needed used **about 57% less** per issue than an Opus attempt ([numbers and caveats](#what-it-saves)).
 
-**Long chats: Autoswitch handoffs vs Claude Code's compaction.** When a long chat moves to a new chat, the new model reads a handoff instead of the whole history. Compared with compacting (Sonnet 5.5 taking over, 50 questions about the earlier chat, [details](docs/BENCHMARK.md)):
+**Long chats: Autoswitch handoffs vs Claude Code's compaction.** When a long chat moves to a new chat, the new model reads a handoff (plus a searchable journal) instead of a compaction summary. Tested on 9 real chats (coding, planning, research, debugging, one long messy chat) at 200k, 2 at 500k and 1 at ~1M (920k), with each model taking over; 40 questions per chat on decisions, early instructions, file and code state, and what's left to do ([full results](docs/HANDOFF_VS_COMPACTION.md)):
 
-| Chat size | Remembers: handoff / compaction | Usage per switch: handoff / compaction | Less usage than compacting |
-|---|---|---|---|
-| 266k (measured) | **94%** / 79% | 19¢ / 62¢ | **69%** |
-| 500k (estimate) | **~94%** / ~70% | ~25¢ / ~$1.07 | **~77%** |
-| 1M (remembering measured, compaction cost estimated) | **94%** / 69% | 35¢ / ~$1.93 | **~82%** |
+| Model taking over | 200k, 9 chats: handoff / compaction | 500k, 2 chats | ~1M, 1 chat | Usage vs compacting |
+|---|---|---|---|---|
+| Opus (rollover) | **97%** (94-100%) / 80% (62-91%) | **95%** / 73% | **100%** / 75% | 26-77% less |
+| Sonnet | **92%** (85-96%) / 82% (70-90%) | 78% / 77% | **76%** / 70% | 66-93% less |
+| Haiku | **91%** (0-92%) / 79% (71-94%) | 72% / 75% | **82%** / 71% | 91-99% less |
 
-*"Remembers" = how many questions were answered as well as by a model that re-read the whole chat. At 1M a handoff remembered most of the decisions and early instructions that compaction lost (decisions 9/10 vs 4.5/10, early instructions 6.5/7 vs 2/7). The 500k row is interpolated between the measured 266k and 1M points, not measured. Handoffs are off by default: [turn them on](#long-chats-handoffs-and-rollover-off-by-default).*
+*"Remembers" = questions answered as well as by the same model re-reading the whole chat; median with the range across chats. With Opus taking over (what a rollover does) the handoff remembered more than compaction in every chat. Sonnet and Haiku need the "search the journal before saying unknown" rule added in 0.3.8: without it they skipped the journal and fell as low as 51%; with it they beat compaction at 200k and roughly tie it at 500k and above, for a fraction of the usage. One Haiku run still answered "unknown" to everything (the 0%). The 500k and 1M rows come from only 2 and 1 chats. Handoffs are off by default: [turn them on](#long-chats-handoffs-and-rollover-off-by-default).*
 
 > **What "usage" means here.** Token usage weighted by each model's API list price, so a token of Opus counts for more than a token of Haiku, and a cached re-read counts for far less than fresh input. On a Pro or Max plan your bill stays the same; what you get is more work before you hit your 5-hour and weekly limits. Anthropic doesn't publish exactly how those limits are counted, but bigger models and longer chats use them up faster too, so read these percentages as estimates of how much further your limits go, not money back. On API keys they are money.
 

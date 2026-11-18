@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.8
+
+- **The handoff tells part 2 to search the journal before answering "unknown".** In a new test on 9 real chats,
+  Haiku and Sonnet almost never looked anything up and fell as low as 51% of re-reading; with this rule they beat
+  compaction at 200k and roughly tie it at 500k and above. Opus already searched on its own.
+- **New benchmark: handoff vs compaction across many chats** ([docs/HANDOFF_VS_COMPACTION.md](docs/HANDOFF_VS_COMPACTION.md)),
+  with the script to rerun it on your own chats (`bench/handoff_vs_compaction.py`, subscription only). The README
+  table now shows those measured results, replacing the earlier one-chat numbers and the 500k estimate.
+
 ## 0.3.7
 
 - **Handoffs never use an API key.** The handoff ran ACPMH's Haiku fact extraction, billed to your API key, whenever
